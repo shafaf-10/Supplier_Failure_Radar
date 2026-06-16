@@ -1,3 +1,4 @@
+
 from app.middlewares.request_logger import (
     request_logger_middleware,
 )
@@ -29,6 +30,7 @@ def scheduled_supplier_pipeline():
         from app.ml.pipeline import run_prediction_pipeline
 
         run_prediction_pipeline()
+        
         clear_supplier_cache()
         print("Scheduled supplier pipeline completed.")
     except Exception as error:

@@ -7,12 +7,14 @@ from sklearn.ensemble import IsolationForest
 from sqlalchemy import text
 
 from app.infra.database import engine
+from app.ml.future_risk_predictor import add_future_risk_predictions
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
 FEATURE_FILE = ROOT_DIR / "outputs" / "supplier_features.csv"
 MODEL_FILE = ROOT_DIR / "app" / "ml" / "models" / "risk_model.pkl"
+FUTURE_MODEL_FILE = ROOT_DIR / "app" / "ml" / "models" / "future_failure_model.pkl"
 ANOMALY_MODEL_FILE = ROOT_DIR / "app" / "ml" / "models" / "anomaly_model.pkl"
 ANOMALY_FILE = ROOT_DIR / "outputs" / "supplier_anomalies.csv"
 
@@ -57,6 +59,12 @@ def ensure_prediction_table_columns():
         "anomaly_score": "DECIMAL(10,6) DEFAULT 0",
         "anomaly_status": "VARCHAR(50)",
         "recommendation": "TEXT",
+        "future_instability_probability": "DECIMAL(8,4) DEFAULT 0",
+        "future_risk_window": "VARCHAR(50)",
+        "early_warning_status": "VARCHAR(50)",
+        "lead_signal": "VARCHAR(100)",
+        "prediction_confidence": "VARCHAR(50)",
+        "future_recommendation": "TEXT",
     }
 
     with engine.begin() as conn:
@@ -105,6 +113,125 @@ def get_recommendation(row):
     return "Supplier is stable. Continue normal monitoring."
 
 
+def get_risk_prediction_probability(model, x_values):
+    if hasattr(model, "predict_proba"):
+        probabilities = model.predict_proba(x_values)
+        return probabilities.max(axis=1)
+
+    return [0.0] * len(x_values)
+
+
+def get_warning_status(probability):
+    if probability >= 0.70:
+        return "CRITICAL_WARNING"
+
+    if probability >= 0.45:
+        return "WARNING"
+
+    if probability >= 0.25:
+        return "WATCHLIST"
+
+    return "STABLE"
+
+
+def get_prediction_confidence(probability):
+    if probability >= 0.70 or probability <= 0.20:
+        return "HIGH"
+
+    if probability >= 0.45:
+        return "MEDIUM"
+
+    return "LOW"
+
+
+def build_ml_future_recommendation(row):
+    probability_pct = round(
+        float(row["future_instability_probability"]) * 100,
+        1,
+    )
+
+    lead_signal = row.get("lead_signal", "Operational Risk")
+    warning_status = row.get("early_warning_status", "STABLE")
+
+    if warning_status == "CRITICAL_WARNING":
+        return (
+            f"ML model predicts high probability of supplier instability "
+            f"in the next 7 days ({probability_pct}%). "
+            f"Primary lead signal: {lead_signal}. "
+            f"Prepare backup supplier, reduce dependency, and monitor closely."
+        )
+
+    if warning_status == "WARNING":
+        return (
+            f"ML model shows warning signs for possible instability "
+            f"in the next 7 days ({probability_pct}%). "
+            f"Primary lead signal: {lead_signal}. "
+            f"Monitor closely and prepare fallback routing."
+        )
+
+    if warning_status == "WATCHLIST":
+        return (
+            f"Supplier is on watchlist based on ML future risk score "
+            f"({probability_pct}%). Main signal: {lead_signal}."
+        )
+
+    return (
+        f"ML model predicts low instability probability for the next 7 days "
+        f"({probability_pct}%)."
+    )
+
+
+def apply_ml_future_failure_prediction(df):
+    """
+    Uses trained future_failure_model.pkl to generate ML-based
+    next-7-days future instability probability.
+
+    Falls back to weighted scoring if future model is not available.
+    """
+
+    df = add_future_risk_predictions(df)
+
+    if not FUTURE_MODEL_FILE.exists():
+        print("Future failure model not found. Using weighted future scoring fallback.")
+        return df
+
+    future_bundle = joblib.load(FUTURE_MODEL_FILE)
+    future_model = future_bundle["model"]
+    future_feature_columns = future_bundle["feature_columns"]
+
+    validate_columns(df, future_feature_columns)
+
+    future_input = df[future_feature_columns].fillna(0)
+
+    if hasattr(future_model, "predict_proba"):
+        future_probabilities = future_model.predict_proba(future_input)[:, 1]
+    else:
+        future_predictions = future_model.predict(future_input)
+        future_probabilities = future_predictions
+
+    df["future_instability_probability"] = [
+        round(float(prob), 4)
+        for prob in future_probabilities
+    ]
+
+    df["future_risk_window"] = "NEXT_7_DAYS"
+
+    df["early_warning_status"] = df[
+        "future_instability_probability"
+    ].apply(get_warning_status)
+
+    df["prediction_confidence"] = df[
+        "future_instability_probability"
+    ].apply(get_prediction_confidence)
+
+    df["future_recommendation"] = df.apply(
+        build_ml_future_recommendation,
+        axis=1,
+    )
+
+    return df
+
+
 def detect_anomalies():
     print(f"Loading features from: {FEATURE_FILE}")
 
@@ -116,7 +243,7 @@ def detect_anomalies():
 
     validate_columns(df, ANOMALY_FEATURES)
 
-    X = df[ANOMALY_FEATURES].fillna(0)
+    x_anomaly = df[ANOMALY_FEATURES].fillna(0)
 
     anomaly_model = IsolationForest(
         n_estimators=300,
@@ -124,8 +251,8 @@ def detect_anomalies():
         random_state=42,
     )
 
-    df["anomaly_flag"] = anomaly_model.fit_predict(X)
-    df["anomaly_score"] = anomaly_model.decision_function(X)
+    df["anomaly_flag"] = anomaly_model.fit_predict(x_anomaly)
+    df["anomaly_score"] = anomaly_model.decision_function(x_anomaly)
 
     df["anomaly_status"] = df["anomaly_flag"].map(
         {
@@ -145,10 +272,19 @@ def detect_anomalies():
 
     risk_input = df[feature_columns].fillna(0)
     risk_predictions = risk_model.predict(risk_input)
+    risk_probabilities = get_risk_prediction_probability(
+        risk_model,
+        risk_input,
+    )
 
     df["predicted_risk"] = [
         reverse_label_map[int(pred)]
         for pred in risk_predictions
+    ]
+
+    df["prediction_probability"] = [
+        round(float(prob), 4)
+        for prob in risk_probabilities
     ]
 
     df["recommendation"] = df.apply(
@@ -156,15 +292,24 @@ def detect_anomalies():
         axis=1,
     )
 
+    df = apply_ml_future_failure_prediction(df)
+
     result = df[
         [
             "supplier_code",
             "risk_score",
             "risk_level",
             "predicted_risk",
+            "prediction_probability",
             "anomaly_score",
             "anomaly_status",
             "recommendation",
+            "future_instability_probability",
+            "future_risk_window",
+            "early_warning_status",
+            "lead_signal",
+            "prediction_confidence",
+            "future_recommendation",
         ]
     ].copy()
 
@@ -191,29 +336,41 @@ def detect_anomalies():
                         predicted_risk,
                         anomaly_score,
                         anomaly_status,
-                        recommendation
+                        recommendation,
+                        future_instability_probability,
+                        future_risk_window,
+                        early_warning_status,
+                        lead_signal,
+                        prediction_confidence,
+                        future_recommendation
                     )
                     VALUES (
                         :supplier_code,
                         :predicted_risk,
-                        1.0000,
-                        'RandomForest + IsolationForest',
-                        :recommendation,
+                        :prediction_probability,
+                        'RandomForest + IsolationForest + FutureFailureML',
+                        :future_recommendation,
                         :risk_score,
                         :risk_level,
                         :predicted_risk,
                         :anomaly_score,
                         :anomaly_status,
-                        :recommendation
+                        :recommendation,
+                        :future_instability_probability,
+                        :future_risk_window,
+                        :early_warning_status,
+                        :lead_signal,
+                        :prediction_confidence,
+                        :future_recommendation
                     )
                     """
                 ),
                 row.to_dict(),
             )
 
-    print("Production anomaly detection completed successfully.")
+    print("Production anomaly and ML future failure prediction completed successfully.")
     print(f"Anomaly model saved to: {ANOMALY_MODEL_FILE}")
-    print(f"Anomaly output saved to: {ANOMALY_FILE}")
+    print(f"Prediction output saved to: {ANOMALY_FILE}")
     print(result)
 
 

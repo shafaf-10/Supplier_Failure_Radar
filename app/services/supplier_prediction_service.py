@@ -30,9 +30,7 @@ class SupplierPredictionService:
         """)
 
         with engine.connect() as conn:
-            latest_date = conn.execute(
-                latest_date_query
-            ).scalar()
+            latest_date = conn.execute(latest_date_query).scalar()
 
         where_clause = "1=1"
 
@@ -53,12 +51,44 @@ class SupplierPredictionService:
                 f.risk_level,
 
                 COALESCE(p.predicted_risk, f.risk_level) AS predicted_risk,
+                COALESCE(p.prediction_probability, 0) AS prediction_probability,
                 COALESCE(p.anomaly_status, 'NORMAL') AS anomaly_status,
                 COALESCE(p.anomaly_score, 0) AS anomaly_score,
+
                 COALESCE(
                     p.recommendation,
                     'Supplier is stable. Continue normal monitoring.'
                 ) AS recommendation,
+
+                COALESCE(
+                    p.future_instability_probability,
+                    0
+                ) AS future_instability_probability,
+
+                COALESCE(
+                    p.future_risk_window,
+                    'NEXT_7_DAYS'
+                ) AS future_risk_window,
+
+                COALESCE(
+                    p.early_warning_status,
+                    'STABLE'
+                ) AS early_warning_status,
+
+                COALESCE(
+                    p.lead_signal,
+                    'Normal Operations'
+                ) AS lead_signal,
+
+                COALESCE(
+                    p.prediction_confidence,
+                    'LOW'
+                ) AS prediction_confidence,
+
+                COALESCE(
+                    p.future_recommendation,
+                    p.recommendation
+                ) AS future_recommendation,
 
                 f.failure_rate,
                 f.pending_rate,
@@ -114,8 +144,31 @@ class SupplierPredictionService:
                     1 for s in suppliers
                     if s["anomaly_status"] == "ANOMALY"
                 ),
+                "critical_future_warnings": sum(
+                    1 for s in suppliers
+                    if s["early_warning_status"] == "CRITICAL_WARNING"
+                ),
+                "warning_suppliers": sum(
+                    1 for s in suppliers
+                    if s["early_warning_status"] in [
+                        "WARNING",
+                        "CRITICAL_WARNING",
+                    ]
+                ),
                 "average_risk_score": round(
                     sum(float(s["risk_score"] or 0) for s in suppliers) / total,
+                    2,
+                ) if total else 0,
+                "average_future_instability_probability": round(
+                    (
+                        sum(
+                            float(
+                                s["future_instability_probability"] or 0
+                            )
+                            for s in suppliers
+                        )
+                        / total
+                    ) * 100,
                     2,
                 ) if total else 0,
             },
