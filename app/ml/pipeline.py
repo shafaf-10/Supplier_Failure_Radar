@@ -1,7 +1,5 @@
 from app.ml.feature_builder import build_supplier_features
 from app.ml.anomaly_detector import detect_anomalies
-
-
 def run_prediction_pipeline():
     """
     Production pipeline:
@@ -14,6 +12,7 @@ def run_prediction_pipeline():
 
     build_supplier_features()
     detect_anomalies()
+
 
     print("Supplier prediction pipeline completed successfully.")
 

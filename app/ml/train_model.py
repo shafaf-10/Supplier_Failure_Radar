@@ -89,22 +89,21 @@ def create_future_failure_target(df):
     future_failure = (
         (df["risk_score"] >= 30)
         | (
-            (df["risk_score"] >= 20)
+            (df["risk_score"] >= 18)
             & (
-                (df["b_failure_rate"] >= 0.13)
-                | (df["bp_error_rate"] >= 0.16)
+                (df["b_failure_rate"] >= 0.08)
+                | (df["bp_error_rate"] >= 0.15)
                 | (df["ss_failure_rate"] >= 0.25)
-                | (df["wt_wallet_risk_score_100"] >= 11)
+                | (df["ss_timeout_rate"] >= 0.18)
             )
         )
-        | (df["b_failure_rate"] >= 0.18)
-        | (df["bp_error_rate"] >= 0.22)
-        | (df["ss_failure_rate"] >= 0.40)
-        | (df["ss_timeout_rate"] >= 0.25)
-        | (df["rr_pending_rate"] >= 0.20)
-        | (df["cr_rejection_rate"] >= 0.18)
-        | (df["wt_failed_payment_rate"] >= 0.15)
-        | (df["wt_wallet_risk_score_100"] >= 15)
+        | (
+            (df["risk_score"] >= 15)
+            & (
+                (df["wt_wallet_risk_score_100"] >= 12)
+                | (df["cr_rejection_rate"] >= 0.15)
+            )
+        )
     )
 
     return future_failure.astype(int)

@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime, timedelta
 
 from faker import Faker
+from sqlalchemy import text
 
 from app.infra.database import SessionLocal
 from app.domain.models import (
@@ -85,6 +86,35 @@ SEARCH_STATUSES = ["COMPLETED", "PARTIAL", "FAILED", "TIMEOUT"]
 WALLET_TYPES = ["CREDIT", "DEBIT", "HOLD", "RELEASE", "FAILED_PAYMENT"]
 
 
+def clear_transaction_data(db):
+    print("Clearing old transaction and ML output data...")
+
+    tables = [
+        "supplier_predictions",
+        "supplier_features",
+        "supplier_feature_history",
+        "wallet_transactions",
+        "credit_requests",
+        "refund_requests",
+        "booking_passengers",
+        "booking_segments",
+        "booking_flights",
+        "bookings",
+        "booking_processes",
+        "search_sessions",
+    ]
+
+    db.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
+
+    for table in tables:
+        db.execute(text(f"DELETE FROM {table}"))
+
+    db.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
+    db.commit()
+
+    print("Old transaction data cleared successfully.")
+
+
 def choose_supplier_group(supplier_code):
     return SUPPLIER_RISK_PROFILE.get(supplier_code, "MEDIUM")
 
@@ -107,7 +137,7 @@ def choose_booking_status(group):
 
 def random_date():
     return datetime.now() - timedelta(
-        days=random.randint(0, 30),
+        days=random.randint(0, 90),
         hours=random.randint(0, 23),
         minutes=random.randint(0, 59),
     )
@@ -118,21 +148,100 @@ def get_master_data(db):
     airlines = db.query(Airline).all()
     airports = db.query(Airport).all()
 
+    users = db.execute(
+        text("""
+            SELECT
+                id,
+                agent_id
+            FROM users
+            WHERE agent_id IS NOT NULL
+              AND is_active = 1
+        """)
+    ).mappings().all()
+
     if not suppliers:
-        raise Exception("No suppliers found. Please insert suppliers first.")
+        raise Exception("No suppliers found.")
     if not airlines:
-        raise Exception("No airlines found. Please insert airlines first.")
+        raise Exception("No airlines found.")
     if not airports:
-        raise Exception("No airports found. Please insert airports first.")
+        raise Exception("No airports found.")
+    if not users:
+        raise Exception("No active users linked to agents found.")
 
-    return suppliers, airlines, airports
+    return suppliers, airlines, airports, users
 
 
-def generate_chunk(db, start_index, end_index, suppliers, airlines, airports):
-    supplier_count = len(suppliers)
+def select_user(users):
+    user = random.choice(users)
 
+    return {
+        "user_id": int(user["id"]),
+        "agent_id": int(user["agent_id"]),
+    }
+
+
+def choose_supplier_by_distribution(suppliers):
+    supplier_map = {
+        supplier.code: supplier
+        for supplier in suppliers
+    }
+
+    weighted_codes = [
+        "sup_f8a1",
+        "sup_t6v3",
+        "travclan",
+        "sup_x9p4",
+        "sup_k2m7",
+        "sup_q7d2",
+    ]
+
+    weights = [
+        0.25,
+        0.22,
+        0.18,
+        0.13,
+        0.12,
+        0.10,
+    ]
+
+    available_codes = [
+        code for code in weighted_codes
+        if code in supplier_map
+    ]
+
+    if not available_codes:
+        return random.choice(suppliers)
+
+    available_weights = [
+        weights[weighted_codes.index(code)]
+        for code in available_codes
+    ]
+
+    selected_code = random.choices(
+        available_codes,
+        weights=available_weights,
+        k=1,
+    )[0]
+
+    return supplier_map[selected_code]
+
+
+def generate_chunk(
+    db,
+    start_index,
+    end_index,
+    suppliers,
+    airlines,
+    airports,
+    users,
+):
     for i in range(start_index, end_index):
-        supplier = suppliers[i % supplier_count]
+        selected_user = select_user(users)
+
+        user_id = selected_user["user_id"]
+        agent_id = selected_user["agent_id"]
+
+        supplier = choose_supplier_by_distribution(suppliers)
         supplier_code = supplier.code
         group = choose_supplier_group(supplier_code)
         behavior = SUPPLIER_BEHAVIOR[group]
@@ -164,13 +273,13 @@ def generate_chunk(db, start_index, end_index, suppliers, airlines, airports):
             process_state = random.choice(["FAILED", "STUCK"])
 
         process = BookingProcess(
-            user_id=random.randint(1, 50),
+            user_id=user_id,
             provider_code=supplier_code,
             state=process_state,
             current_step=random.choice(
                 ["SEARCH", "FARE_CONFIRM", "BOOKING", "TICKETING", "PAYMENT"]
             ),
-            context="Generated production-style training booking process",
+            context="Generated production-style B2B booking process",
             supplier_context=f"Supplier group: {group}",
             error_context=(
                 fake.sentence()
@@ -192,12 +301,13 @@ def generate_chunk(db, start_index, end_index, suppliers, airlines, airports):
         total_amount = random.randint(3500, 85000)
 
         issue_date = None
-        if status in ["TICKETED", "CONFIRMED"]:
+        if status == "TICKETED":
             delay_hours = {
                 "GOOD": random.randint(1, 4),
                 "MEDIUM": random.randint(2, 10),
                 "HIGH_RISK": random.randint(4, 24),
             }[group]
+
             issue_date = created_at + timedelta(hours=delay_hours)
 
         booking = Booking(
@@ -220,8 +330,8 @@ def generate_chunk(db, start_index, end_index, suppliers, airlines, airports):
                 else None
             ),
             booked_at=created_at,
-            agent_id=random.randint(1, 100),
-            user_id=random.randint(1, 50),
+            agent_id=agent_id,
+            user_id=user_id,
             created_at=created_at,
             booking_date=created_at,
             updated_at=created_at + timedelta(minutes=random.randint(1, 120)),
@@ -309,7 +419,7 @@ def generate_chunk(db, start_index, end_index, suppliers, airlines, airports):
                 + timedelta(days=random.randint(300, 3000)),
                 ticket_number=(
                     fake.bothify(text="###-##########")
-                    if status in ["TICKETED", "CONFIRMED"]
+                    if status == "TICKETED"
                     else None
                 ),
                 ff_airline=random.choice([airline.iata_code, None]),
@@ -347,12 +457,13 @@ def generate_chunk(db, start_index, end_index, suppliers, airlines, airports):
                     "MEDIUM": random.randint(5, 18),
                     "HIGH_RISK": random.randint(15, 45),
                 }[group]
+
                 refunded_at = created_at + timedelta(days=refund_days)
                 refunded_amount = total_amount * random.uniform(0.60, 0.95)
 
             refund = RefundRequest(
                 booking_id=booking.id,
-                agent_id=booking.agent_id,
+                agent_id=agent_id,
                 reference_no=f"REF{i}",
                 pnr=booking.pnr,
                 status=refund_status,
@@ -381,7 +492,7 @@ def generate_chunk(db, start_index, end_index, suppliers, airlines, airports):
             )[0]
 
             credit = CreditRequest(
-                agent_id=booking.agent_id,
+                agent_id=agent_id,
                 admin_id=random.randint(1, 10),
                 supplier_code=supplier_code,
                 amount=random.randint(10000, 300000),
@@ -452,7 +563,7 @@ def generate_chunk(db, start_index, end_index, suppliers, airlines, airports):
 
         wallet = WalletTransaction(
             parent_id=None,
-            wallet_account_id=random.randint(1, 50),
+            wallet_account_id=agent_id,
             supplier_code=supplier_code,
             type=wallet_type,
             ledger_category=random.choice(["BOOKING", "REFUND", "CREDIT", "ADJUSTMENT"]),
@@ -461,7 +572,7 @@ def generate_chunk(db, start_index, end_index, suppliers, airlines, airports):
             closing_balance=closing_balance,
             credit_days_term=random.randint(1, 7),
             due_date=created_at + timedelta(days=random.randint(1, 7)),
-            agent_id=booking.agent_id,
+            agent_id=agent_id,
             amount=amount,
             currency="INR",
             payment_amount=amount,
@@ -472,7 +583,7 @@ def generate_chunk(db, start_index, end_index, suppliers, airlines, airports):
             reference_id=booking.id,
             description=f"{group} wallet transaction for booking {booking.id}",
             running_balance=closing_balance,
-            created_by=random.randint(1, 10),
+            created_by=user_id,
             created_at=created_at,
             updated_at=booking.updated_at,
         )
@@ -486,11 +597,14 @@ def main():
     db = SessionLocal()
 
     try:
-        suppliers, airlines, airports = get_master_data(db)
+        suppliers, airlines, airports, users = get_master_data(db)
 
-        print("Production-style training data generation started...")
+        clear_transaction_data(db)
+
+        print("Production-style B2B training data generation started...")
         print(f"Total bookings: {TOTAL_BOOKINGS}")
         print(f"Chunk size: {CHUNK_SIZE}")
+        print(f"Valid users linked to agents: {len(users)}")
         print("Supplier risk mapping:")
 
         for supplier in suppliers:
@@ -508,11 +622,12 @@ def main():
                 suppliers=suppliers,
                 airlines=airlines,
                 airports=airports,
+                users=users,
             )
 
             print(f"Chunk completed: {start + 1} to {end}")
 
-        print("Production-style training data generation completed successfully.")
+        print("Production-style B2B data generation completed successfully.")
 
     except Exception as error:
         db.rollback()
