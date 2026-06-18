@@ -23,102 +23,68 @@ class SupplierPredictionService:
             return cached
 
         latest_date_query = text("""
-            SELECT MAX(COALESCE(p.created_at, f.created_at)) AS latest_date
-            FROM supplier_features AS f
-            LEFT JOIN supplier_predictions AS p
-                ON f.supplier_code = p.supplier_code
+            SELECT MAX(created_at) AS latest_date
+            FROM supplier_predictions
         """)
 
         with engine.connect() as conn:
             latest_date = conn.execute(latest_date_query).scalar()
 
         where_clause = "1=1"
+        params = {}
 
         if period in cls.PERIOD_INTERVALS and latest_date is not None:
             interval_value = cls.PERIOD_INTERVALS[period]
 
             where_clause = (
-                f"COALESCE(p.created_at, f.created_at) "
-                f">= DATE_SUB(:latest_date, INTERVAL {interval_value})"
+                f"created_at >= DATE_SUB(:latest_date, INTERVAL {interval_value})"
             )
+
+            params["latest_date"] = latest_date
 
         query = text(f"""
             SELECT
-                f.supplier_code,
-                f.supplier_name,
-                f.total_bookings,
-                f.risk_score,
-                f.risk_level,
+                supplier_code,
+                supplier_name,
+                total_bookings,
 
-                COALESCE(p.predicted_risk, f.risk_level) AS predicted_risk,
-                COALESCE(p.prediction_probability, 0) AS prediction_probability,
-                COALESCE(p.anomaly_status, 'NORMAL') AS anomaly_status,
-                COALESCE(p.anomaly_score, 0) AS anomaly_score,
+                risk_score,
+                risk_level,
+                predicted_risk,
+                prediction_probability,
 
-                COALESCE(
-                    p.recommendation,
-                    'Supplier is stable. Continue normal monitoring.'
-                ) AS recommendation,
+                anomaly_status,
+                anomaly_score,
 
-                COALESCE(
-                    p.future_instability_probability,
-                    0
-                ) AS future_instability_probability,
+                recommendation,
 
-                COALESCE(
-                    p.future_risk_window,
-                    'NEXT_7_DAYS'
-                ) AS future_risk_window,
+                future_instability_probability,
+                future_risk_window,
+                early_warning_status,
+                lead_signal,
+                prediction_confidence,
+                future_recommendation,
 
-                COALESCE(
-                    p.early_warning_status,
-                    'STABLE'
-                ) AS early_warning_status,
+                failure_rate,
+                pending_rate,
+                cancellation_rate,
+                process_error_rate,
+                refund_rate,
+                credit_rejection_rate,
+                search_failure_rate,
+                wallet_risk_rate,
 
-                COALESCE(
-                    p.lead_signal,
-                    'Normal Operations'
-                ) AS lead_signal,
+                created_at
 
-                COALESCE(
-                    p.prediction_confidence,
-                    'LOW'
-                ) AS prediction_confidence,
-
-                COALESCE(
-                    p.future_recommendation,
-                    p.recommendation
-                ) AS future_recommendation,
-
-                f.failure_rate,
-                f.pending_rate,
-                f.cancellation_rate,
-                f.process_error_rate,
-                f.refund_rate,
-                f.credit_rejection_rate,
-                f.search_failure_rate,
-                f.wallet_risk_rate,
-                COALESCE(p.created_at, f.created_at) AS created_at
-
-            FROM supplier_features AS f
-            LEFT JOIN supplier_predictions AS p
-                ON f.supplier_code = p.supplier_code
+            FROM supplier_predictions
 
             WHERE {where_clause}
 
-            ORDER BY f.risk_score DESC
+            ORDER BY risk_score DESC
         """)
 
-        params = {}
-
-        if period in cls.PERIOD_INTERVALS and latest_date is not None:
-            params["latest_date"] = latest_date
-
         with engine.connect() as conn:
-            rows = conn.execute(
-                query,
-                params,
-            ).mappings().all()
+            rows = conn.execute(query, params).mappings().all()
 
         suppliers = [dict(row) for row in rows]
         total = len(suppliers)

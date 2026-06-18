@@ -7,15 +7,6 @@ router = APIRouter()
 
 VALID_PERIODS = ["24h", "7d", "30d", "1y", "all"]
 
-
-@router.get("/health")
-def health_check():
-    return {
-        "status": "ok",
-        "service": "Supplier Failure Radar API",
-    }
-
-
 @router.get("/supplier-predictions")
 def get_supplier_predictions(
     period: str = Query("all"),

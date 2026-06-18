@@ -234,7 +234,6 @@ def build_supplier_features(days=None, persist=True):
     if persist:
         os.makedirs(ROOT_DIR / "outputs", exist_ok=True)
         features.to_csv(OUTPUT_FILE, index=False)
-        save_features_to_db(features)
 
     print("Supplier features created successfully.")
 
