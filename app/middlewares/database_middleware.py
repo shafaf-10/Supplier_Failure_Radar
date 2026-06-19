@@ -16,7 +16,7 @@ async def database_middleware(
         try:
             from app.infra.database import engine
 
-            engine.dispose()
+            #engine.dispose()
 
         except Exception:
             pass

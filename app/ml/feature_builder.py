@@ -14,16 +14,33 @@ from app.ml.feature_engineering.refund_features import build_refund_features
 from app.ml.feature_engineering.credit_features import build_credit_features
 from app.ml.feature_engineering.wallet_features import build_wallet_features
 from app.ml.feature_engineering.build_master import build_master_supplier_table
+from app.observability.logger import setup_logger
+logger = setup_logger(__name__)
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 OUTPUT_FILE = ROOT_DIR / "outputs" / "supplier_features.csv"
 
 
+ALLOWED_TABLES = {
+    "suppliers",
+    "bookings",
+    "booking_processes",
+    "booking_flights",
+    "booking_passengers",
+    "search_sessions",
+    "refund_requests",
+    "credit_requests",
+    "wallet_transactions",
+}
+
+
 def read_table(table_name):
-    return pd.read_sql(f"SELECT * FROM {table_name}", engine)
+    if table_name not in ALLOWED_TABLES:
+        raise ValueError(f"Table not allowed: {table_name}")
 
-
+    query = text(f"SELECT * FROM `{table_name}`")
+    return pd.read_sql(query, engine)
 def get_risk_level(score):
     if score >= 28:
         return "HIGH_RISK"
@@ -165,7 +182,7 @@ def build_supplier_features(days=None, persist=True):
     persist=False -> return temporary period-based features only
     """
 
-    print("Loading tables...")
+    logger.info("Loading source tables for supplier feature generation.")
 
     suppliers = read_table("suppliers")
     bookings = read_table("bookings")
@@ -177,7 +194,7 @@ def build_supplier_features(days=None, persist=True):
     credit_requests = read_table("credit_requests")
     wallet_transactions = read_table("wallet_transactions")
 
-    print("Building feature groups...")
+    logger.info("Building supplier feature groups.")
 
     booking_features = build_booking_features(bookings, days=days)
 
@@ -214,7 +231,7 @@ def build_supplier_features(days=None, persist=True):
         days=days,
     )
 
-    print("Merging master supplier feature table...")
+    logger.info("Merging supplier feature groups into master dataframe.")
 
     features = build_master_supplier_table(
         suppliers=suppliers,
@@ -235,7 +252,7 @@ def build_supplier_features(days=None, persist=True):
         os.makedirs(ROOT_DIR / "outputs", exist_ok=True)
         features.to_csv(OUTPUT_FILE, index=False)
 
-    print("Supplier features created successfully.")
+    logger.info("Supplier features created successfully.")
 
     display_cols = [
         "supplier_code",
@@ -257,7 +274,10 @@ def build_supplier_features(days=None, persist=True):
         if col in features.columns
     ]
 
-    print(features[existing_display_cols])
+    logger.info(
+    "Supplier feature summary:\n%s",
+    features[existing_display_cols].to_string(index=False),
+)
 
     return features
 

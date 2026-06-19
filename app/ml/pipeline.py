@@ -1,5 +1,8 @@
 from app.ml.feature_builder import build_supplier_features
 from app.ml.anomaly_detector import detect_anomalies
+from app.observability.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 
 def run_prediction_pipeline():
@@ -14,12 +17,12 @@ def run_prediction_pipeline():
     Features are generated in code and passed directly to the prediction step.
     """
 
-    print("Starting supplier prediction pipeline...")
+    logger.info("Starting supplier prediction pipeline...")
 
     features_df = build_supplier_features()
     detect_anomalies(features_df)
 
-    print("Supplier prediction pipeline completed successfully.")
+    logger.info("Supplier prediction pipeline completed successfully.")
 
     return {
         "status": "success",

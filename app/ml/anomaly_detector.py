@@ -8,7 +8,9 @@ from sqlalchemy import text
 
 from app.infra.database import engine
 from app.ml.future_risk_predictor import add_future_risk_predictions
+from app.observability.logger import setup_logger
 
+logger = setup_logger(__name__)
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
@@ -233,10 +235,10 @@ def apply_ml_future_failure_prediction(df):
 
 def load_features(features_df=None):
     if features_df is not None:
-        print("Using in-memory supplier features from pipeline.")
+        logger.info("Using in-memory supplier features from pipeline.")
         return features_df.fillna(0).copy()
 
-    print(f"Loading features from: {FEATURE_FILE}")
+    logger.info("Using supplier features dataframe for anomaly detection.")
 
     if not FEATURE_FILE.exists():
         raise FileNotFoundError(
@@ -338,7 +340,7 @@ def detect_anomalies(features_df=None):
     os.makedirs(ROOT_DIR / "outputs", exist_ok=True)
     result.to_csv(ANOMALY_FILE, index=False)
 
-    ensure_prediction_table_columns()
+    #ensure_prediction_table_columns()
 
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM supplier_predictions"))
@@ -411,10 +413,13 @@ def detect_anomalies(features_df=None):
                 row.to_dict(),
             )
 
-    print("Production anomaly and ML future failure prediction completed successfully.")
-    print(f"Anomaly model saved to: {ANOMALY_MODEL_FILE}")
-    print(f"Prediction output saved to: {ANOMALY_FILE}")
-    print(result)
+    logger.info("Production anomaly and future risk prediction completed successfully.")
+    logger.info("Using supplier features dataframe for anomaly detection.")
+    logger.info("Prediction output saved to: %s", ANOMALY_FILE)
+    logger.info(
+    "Prediction summary:\n%s",
+    result.to_string(index=False),
+)
 
 
 if __name__ == "__main__":
