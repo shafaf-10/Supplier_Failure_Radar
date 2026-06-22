@@ -249,8 +249,9 @@ def build_supplier_features(days=None, persist=True):
     features = add_backward_compatible_columns(features)
 
     if persist:
-        os.makedirs(ROOT_DIR / "outputs", exist_ok=True)
-        features.to_csv(OUTPUT_FILE, index=False)
+        logger.info(
+        "Feature dataframe generated in memory. CSV writing is disabled in live pipeline."
+    )
 
     logger.info("Supplier features created successfully.")
 

@@ -30,5 +30,4 @@ def run_prediction_pipeline():
 
 
 if __name__ == "__main__":
-    result_df = run_prediction_pipeline()
-    print(result_df)
+    run_prediction_pipeline()

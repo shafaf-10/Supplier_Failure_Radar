@@ -343,8 +343,7 @@ def train_models():
         },
     }
 
-    with open(METRICS_FILE, "w") as file:
-        json.dump(metrics, file, indent=4)
+
 
     risk_preds = best_risk_model.predict(X)
     future_probs = get_positive_class_probability(best_future_model, X)
