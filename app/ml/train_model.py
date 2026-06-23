@@ -1,23 +1,26 @@
-import json
 from pathlib import Path
 
 import joblib
 import pandas as pd
 
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.ensemble import (
+    RandomForestClassifier,
+    GradientBoostingClassifier,
+    IsolationForest,
+)
 from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split
+
+from app.ml.feature_builder import build_supplier_features
+from app.ml.anomaly_detector import ANOMALY_FEATURES
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
-FEATURE_FILE = ROOT_DIR / "outputs" / "supplier_features.csv"
-
 MODEL_DIR = ROOT_DIR / "app" / "ml" / "models"
 RISK_MODEL_FILE = MODEL_DIR / "risk_model.pkl"
 FUTURE_MODEL_FILE = MODEL_DIR / "future_failure_model.pkl"
-
-METRICS_FILE = ROOT_DIR / "outputs" / "model_metrics.json"
+ANOMALY_MODEL_FILE = MODEL_DIR / "anomaly_model.pkl"
 
 
 FEATURE_COLUMNS = [
@@ -67,22 +70,11 @@ REVERSE_LABEL_MAP = {
 }
 
 
-def validate_features(df):
-    missing_cols = [
-        col for col in FEATURE_COLUMNS
-        if col not in df.columns
-    ]
+def validate_columns(df, columns):
+    missing = [col for col in columns if col not in df.columns]
 
-    if missing_cols:
-        raise ValueError(
-            f"Missing feature columns: {missing_cols}. "
-            "Run feature_builder.py again."
-        )
-
-    if "risk_level" not in df.columns:
-        raise ValueError("risk_level column missing.")
-
-    return True
+    if missing:
+        raise ValueError(f"Missing columns: {missing}")
 
 
 def create_future_failure_target(df):
@@ -110,70 +102,49 @@ def create_future_failure_target(df):
 
 
 def evaluate_model(model, X, y, class_names):
-    class_count = y.nunique()
-
-    if len(y) < 10 or class_count < 2:
+    if len(y) < 10 or y.nunique() < 2:
         model.fit(X, y)
         preds = model.predict(X)
 
-        accuracy = accuracy_score(y, preds)
-
-        report = classification_report(
-            y,
-            preds,
-            labels=list(range(len(class_names))),
-            target_names=class_names,
-            output_dict=True,
-            zero_division=0,
+        return (
+            accuracy_score(y, preds),
+            classification_report(
+                y,
+                preds,
+                labels=list(range(len(class_names))),
+                target_names=class_names,
+                output_dict=True,
+                zero_division=0,
+            ),
         )
 
-        return accuracy, report, "trained_and_evaluated_on_full_data_small_dataset"
+    stratify_value = y if y.value_counts().min() >= 2 else None
 
-    try:
-        stratify_value = y if y.value_counts().min() >= 2 else None
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=0.30,
+        random_state=42,
+        stratify=stratify_value,
+    )
 
-        X_train, X_test, y_train, y_test = train_test_split(
-            X,
-            y,
-            test_size=0.30,
-            random_state=42,
-            stratify=stratify_value,
-        )
+    model.fit(X_train, y_train)
+    preds = model.predict(X_test)
 
-        model.fit(X_train, y_train)
-        preds = model.predict(X_test)
+    accuracy = accuracy_score(y_test, preds)
 
-        accuracy = accuracy_score(y_test, preds)
+    report = classification_report(
+        y_test,
+        preds,
+        labels=list(range(len(class_names))),
+        target_names=class_names,
+        output_dict=True,
+        zero_division=0,
+    )
 
-        report = classification_report(
-            y_test,
-            preds,
-            labels=list(range(len(class_names))),
-            target_names=class_names,
-            output_dict=True,
-            zero_division=0,
-        )
+    model.fit(X, y)
 
-        model.fit(X, y)
-
-        return accuracy, report, "train_test_split_then_refit_full_data"
-
-    except Exception:
-        model.fit(X, y)
-        preds = model.predict(X)
-
-        accuracy = accuracy_score(y, preds)
-
-        report = classification_report(
-            y,
-            preds,
-            labels=list(range(len(class_names))),
-            target_names=class_names,
-            output_dict=True,
-            zero_division=0,
-        )
-
-        return accuracy, report, "fallback_full_data_training"
+    return accuracy, report
 
 
 def train_best_classifier(X, y, class_names):
@@ -188,198 +159,105 @@ def train_best_classifier(X, y, class_names):
         ),
     }
 
-    results = {}
-
     best_model_name = None
     best_model = None
     best_accuracy = -1
 
     for model_name, model in models.items():
-        accuracy, report, evaluation_method = evaluate_model(
+        accuracy, _ = evaluate_model(
             model,
             X,
             y,
             class_names,
         )
 
-        results[model_name] = {
-            "accuracy": accuracy,
-            "evaluation_method": evaluation_method,
-            "classification_report": report,
-        }
-
         if accuracy > best_accuracy:
             best_accuracy = accuracy
             best_model_name = model_name
             best_model = model
 
-    return best_model_name, best_model, best_accuracy, results
-
-
-def get_positive_class_probability(model, X):
-    if not hasattr(model, "predict_proba"):
-        return [0.0] * len(X)
-
-    probabilities = model.predict_proba(X)
-
-    if probabilities.shape[1] == 1:
-        only_class = int(model.classes_[0])
-        if only_class == 1:
-            return [1.0] * len(X)
-        return [0.0] * len(X)
-
-    class_list = list(model.classes_)
-
-    if 1 in class_list:
-        positive_index = class_list.index(1)
-    else:
-        positive_index = probabilities.shape[1] - 1
-
-    return probabilities[:, positive_index]
+    return best_model_name, best_model, best_accuracy
 
 
 def train_models():
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    METRICS_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-    if not FEATURE_FILE.exists():
-        raise FileNotFoundError(
-            f"Feature file not found: {FEATURE_FILE}. "
-            "Run python -m app.ml.pipeline first."
-        )
-
-    print(f"Loading features from: {FEATURE_FILE}")
-
-    df = pd.read_csv(FEATURE_FILE)
+    print("Building supplier features in memory...")
+    df = build_supplier_features(persist=False)
     df = df.fillna(0).copy()
 
-    validate_features(df)
+    validate_columns(df, FEATURE_COLUMNS)
+    validate_columns(df, ANOMALY_FEATURES)
 
-    X = df[FEATURE_COLUMNS]
+    if "risk_level" not in df.columns:
+        raise ValueError("risk_level column missing.")
 
     df["risk_target"] = df["risk_level"].map(LABEL_MAP)
 
     if df["risk_target"].isna().any():
         raise ValueError("risk_level contains unknown values.")
 
+    X_risk = df[FEATURE_COLUMNS].fillna(0)
     y_risk = df["risk_target"].astype(int)
 
-    (
-        best_risk_model_name,
-        best_risk_model,
-        best_risk_accuracy,
-        risk_results,
-    ) = train_best_classifier(
-        X,
+    risk_model_name, risk_model, risk_accuracy = train_best_classifier(
+        X_risk,
         y_risk,
         ["LOW_RISK", "MEDIUM_RISK", "HIGH_RISK"],
     )
 
-    risk_model_bundle = {
-        "model": best_risk_model,
-        "model_name": best_risk_model_name,
+    risk_bundle = {
+        "model": risk_model,
+        "model_name": risk_model_name,
         "feature_columns": FEATURE_COLUMNS,
         "label_map": LABEL_MAP,
         "reverse_label_map": REVERSE_LABEL_MAP,
         "model_purpose": "Current supplier risk classification",
     }
 
-    joblib.dump(risk_model_bundle, RISK_MODEL_FILE)
+    joblib.dump(risk_bundle, RISK_MODEL_FILE)
 
     df["future_failure_7d"] = create_future_failure_target(df)
     y_future = df["future_failure_7d"].astype(int)
 
-    (
-        best_future_model_name,
-        best_future_model,
-        best_future_accuracy,
-        future_results,
-    ) = train_best_classifier(
-        X,
+    future_model_name, future_model, future_accuracy = train_best_classifier(
+        X_risk,
         y_future,
         ["STABLE_NEXT_7D", "FAILURE_RISK_NEXT_7D"],
     )
 
-    future_model_bundle = {
-        "model": best_future_model,
-        "model_name": best_future_model_name,
+    future_bundle = {
+        "model": future_model,
+        "model_name": future_model_name,
         "feature_columns": FEATURE_COLUMNS,
         "target": "future_failure_7d",
         "model_purpose": "Future supplier instability probability for next 7 days",
-        "target_meaning": (
-            "1 means supplier shows strong operational signals of possible "
-            "instability in the next 7 days."
-        ),
-        "important_note": (
-            "This is an ML-based proxy future-failure model. For real production "
-            "forecasting, replace this proxy target with historical future failure labels."
-        ),
     }
 
-    joblib.dump(future_model_bundle, FUTURE_MODEL_FILE)
+    joblib.dump(future_bundle, FUTURE_MODEL_FILE)
 
-    metrics = {
-        "dataset": {
-            "row_count": int(len(df)),
-            "supplier_count": int(df["supplier_code"].nunique())
-            if "supplier_code" in df.columns
-            else int(len(df)),
-            "warning": (
-                "Dataset is small. Accuracy may be optimistic. "
-                "Collect supplier snapshots for stronger production forecasting."
-            ),
-        },
-        "risk_model": {
-            "best_model": best_risk_model_name,
-            "best_accuracy": best_risk_accuracy,
-            "target_distribution": df["risk_level"].value_counts().to_dict(),
-            "results": risk_results,
-        },
-        "future_failure_model": {
-            "best_model": best_future_model_name,
-            "best_accuracy": best_future_accuracy,
-            "target_distribution": df["future_failure_7d"].value_counts().to_dict(),
-            "results": future_results,
-        },
-    }
+    X_anomaly = df[ANOMALY_FEATURES].fillna(0)
 
+    anomaly_model = IsolationForest(
+        n_estimators=300,
+        contamination=0.20,
+        random_state=42,
+    )
 
-
-    risk_preds = best_risk_model.predict(X)
-    future_probs = get_positive_class_probability(best_future_model, X)
-
-    output = df[
-        [
-            "supplier_code",
-            "risk_score",
-            "risk_level",
-            "future_failure_7d",
-        ]
-    ].copy()
-
-    output["predicted_risk"] = [
-        REVERSE_LABEL_MAP[int(pred)]
-        for pred in risk_preds
-    ]
-
-    output["future_failure_probability"] = [
-        round(float(prob), 4)
-        for prob in future_probs
-    ]
+    anomaly_model.fit(X_anomaly)
+    joblib.dump(anomaly_model, ANOMALY_MODEL_FILE)
 
     print("Production ML training completed successfully.")
-    print(f"Risk model: {best_risk_model_name}")
-    print(f"Risk accuracy: {best_risk_accuracy:.4f}")
     print(f"Risk model saved to: {RISK_MODEL_FILE}")
+    print(f"Future model saved to: {FUTURE_MODEL_FILE}")
+    print(f"Anomaly model saved to: {ANOMALY_MODEL_FILE}")
+    print(f"Risk accuracy: {risk_accuracy:.4f}")
+    print(f"Future accuracy: {future_accuracy:.4f}")
 
-    print(f"Future failure model: {best_future_model_name}")
-    print(f"Future failure accuracy: {best_future_accuracy:.4f}")
-    print(f"Future failure model saved to: {FUTURE_MODEL_FILE}")
-
-    print(f"Metrics saved to: {METRICS_FILE}")
-
-    print("\nPredictions:")
-    print(output)
+    print("\nCreated model files:")
+    print("- risk_model.pkl")
+    print("- future_failure_model.pkl")
+    print("- anomaly_model.pkl")
 
 
 if __name__ == "__main__":
