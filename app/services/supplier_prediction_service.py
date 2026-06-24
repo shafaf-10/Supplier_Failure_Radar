@@ -12,6 +12,13 @@ logger = setup_logger(__name__)
 
 class SupplierPredictionService:
     CACHE_PREFIX = "supplier_predictions"
+    PERIOD_TO_DAYS = {
+    "24h": 1,
+    "7d": 7,
+    "30d": 30,
+    "1y": 365,
+    "all": None,
+    }
 
     @classmethod
     def _to_float(cls, value, default=0.0):
@@ -151,7 +158,8 @@ class SupplierPredictionService:
 
         logger.info("Cache miss. Running supplier prediction pipeline in memory.")
 
-        prediction_df = run_prediction_pipeline()
+        days = cls.PERIOD_TO_DAYS.get(period, 30)
+        prediction_df = run_prediction_pipeline(days=days)
 
         if prediction_df is None or prediction_df.empty:
             response = {

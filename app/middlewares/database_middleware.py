@@ -1,22 +1,8 @@
-from fastapi import Request
+"""
+Database middleware removed.
 
-
-async def database_middleware(
-    request: Request,
-    call_next,
-):
-    try:
-        response = await call_next(request)
-        return response
-
-    except Exception:
-        raise
-
-    finally:
-        try:
-            from app.infra.database import engine
-
-            #engine.dispose()
-
-        except Exception:
-            pass
+Reason:
+The supplier pipeline uses SQLAlchemy engine directly.
+No per-request database session is created here.
+Keeping this middleware as a no-op creates dead code.
+"""

@@ -1,2 +1,0 @@
-class SupplierPredictionError(Exception):
-    pass

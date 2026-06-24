@@ -1,3 +1,4 @@
+from fastapi.concurrency import run_in_threadpool
 from fastapi import APIRouter, HTTPException, Query
 
 from app.services.supplier_prediction_service import SupplierPredictionService
@@ -21,17 +22,20 @@ def get_supplier_predictions(
 
 
 @router.post("/refresh-model")
-def refresh_model():
+async def refresh_model():
     try:
-        from app.ml.pipeline import run_prediction_pipeline
-
-        result = run_prediction_pipeline()
         SupplierPredictionService.clear_cache()
+
+        result = await run_in_threadpool(
+    SupplierPredictionService.get_predictions,
+    "all",
+)
 
         return {
             "status": "success",
             "message": "Supplier prediction pipeline refreshed successfully.",
-            "pipeline": result,
+            "summary": result.get("summary", {}),
+            "total_suppliers": len(result.get("suppliers", [])),
         }
 
     except Exception as error:

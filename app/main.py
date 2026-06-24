@@ -9,7 +9,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.router import api_router
 from app.infra.redis_provider import clear_supplier_cache
 from app.infra.settings import settings
-from app.middlewares.database_middleware import database_middleware
 from app.middlewares.error_handler import error_handler_middleware
 from app.middlewares.request_logger import request_logger_middleware
 from app.ml.pipeline import run_prediction_pipeline
@@ -94,7 +93,7 @@ app = FastAPI(
 
 app.middleware("http")(error_handler_middleware)
 app.middleware("http")(request_logger_middleware)
-app.middleware("http")(database_middleware)
+# app.middleware("http")(database_middleware)
 
 app.add_middleware(
     CORSMiddleware,

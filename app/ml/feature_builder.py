@@ -15,6 +15,7 @@ from app.ml.feature_engineering.credit_features import build_credit_features
 from app.ml.feature_engineering.wallet_features import build_wallet_features
 from app.ml.feature_engineering.build_master import build_master_supplier_table
 from app.observability.logger import setup_logger
+from app.ml.model_thresholds import RISK_SCORE_THRESHOLDS
 logger = setup_logger(__name__)
 
 
@@ -35,21 +36,53 @@ ALLOWED_TABLES = {
 }
 
 
-def read_table(table_name):
+TABLE_DATE_COLUMNS = {
+    "bookings": "booking_date",
+    "booking_processes": "created_at",
+    "booking_flights": "created_at",
+    "booking_passengers": None,
+    "search_sessions": "created_at",
+    "refund_requests": "created_at",
+    "credit_requests": "created_at",
+    "wallet_transactions": "created_at",
+    "suppliers": None,
+}
+
+
+def read_table(table_name: str, days: int | None = None) -> pd.DataFrame:
     if table_name not in ALLOWED_TABLES:
         raise ValueError(f"Table not allowed: {table_name}")
 
+    date_column = TABLE_DATE_COLUMNS.get(table_name)
+
+    if days is not None and date_column is not None:
+        query = text(
+            f"""
+            SELECT *
+            FROM `{table_name}`
+            WHERE `{date_column}` >= DATE_SUB(
+                (SELECT MAX(`{date_column}`) FROM `{table_name}`),
+                INTERVAL :days DAY
+            )
+            """
+        )
+        return pd.read_sql(query, engine, params={"days": days})
+
     query = text(f"SELECT * FROM `{table_name}`")
     return pd.read_sql(query, engine)
-def get_risk_level(score):
-    if score >= 28:
+def get_risk_level(score: float) -> str:
+    t = RISK_SCORE_THRESHOLDS
+
+    if score >= t["HIGH_RISK"]:
         return "HIGH_RISK"
-    elif score >= 18:
+
+    if score >= t["MEDIUM_RISK"]:
         return "MEDIUM_RISK"
+
     return "LOW_RISK"
 
 
-def calculate_risk_score(df):
+def calculate_risk_score(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
     required_cols = [
@@ -97,7 +130,7 @@ def calculate_risk_score(df):
     return df
 
 
-def add_backward_compatible_columns(df):
+def add_backward_compatible_columns(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
     b_total = df.get("b_total", pd.Series([0] * len(df))).replace(0, 1)
@@ -137,40 +170,8 @@ def add_backward_compatible_columns(df):
     return df.fillna(0).copy()
 
 
-def save_features_to_db(features):
-    db_columns = pd.read_sql(
-        "SHOW COLUMNS FROM supplier_features",
-        engine,
-    )["Field"].tolist()
 
-    insert_columns = [
-        col for col in features.columns
-        if col in db_columns and col != "id"
-    ]
-
-    with engine.begin() as conn:
-        conn.execute(text("DELETE FROM supplier_features"))
-
-        for _, row in features.iterrows():
-            columns_sql = ", ".join(insert_columns)
-            values_sql = ", ".join([f":{col}" for col in insert_columns])
-
-            conn.execute(
-                text(
-                    f"""
-                    INSERT INTO supplier_features (
-                        {columns_sql}
-                    )
-                    VALUES (
-                        {values_sql}
-                    )
-                    """
-                ),
-                {col: row[col] for col in insert_columns},
-            )
-
-
-def build_supplier_features(days=None, persist=True):
+def build_supplier_features(days=None):
     """
     days=None  -> all time
     days=1     -> last 24 hours
@@ -178,21 +179,20 @@ def build_supplier_features(days=None, persist=True):
     days=30    -> last 30 days
     days=365   -> last 1 year
 
-    persist=True  -> save to supplier_features table + CSV
-    persist=False -> return temporary period-based features only
+    Returns in-memory supplier features for the selected period.
     """
 
     logger.info("Loading source tables for supplier feature generation.")
 
     suppliers = read_table("suppliers")
-    bookings = read_table("bookings")
-    booking_processes = read_table("booking_processes")
-    booking_flights = read_table("booking_flights")
+    bookings = read_table("bookings", days=days)
+    booking_processes = read_table("booking_processes", days=days)
+    booking_flights = read_table("booking_flights", days=days)
     booking_passengers = read_table("booking_passengers")
-    search_sessions = read_table("search_sessions")
-    refund_requests = read_table("refund_requests")
-    credit_requests = read_table("credit_requests")
-    wallet_transactions = read_table("wallet_transactions")
+    search_sessions = read_table("search_sessions", days=days)
+    refund_requests = read_table("refund_requests", days=days)
+    credit_requests = read_table("credit_requests", days=days)
+    wallet_transactions = read_table("wallet_transactions", days=days)
 
     logger.info("Building supplier feature groups.")
 
@@ -248,10 +248,6 @@ def build_supplier_features(days=None, persist=True):
     features = calculate_risk_score(features)
     features = add_backward_compatible_columns(features)
 
-    if persist:
-        logger.info(
-        "Feature dataframe generated in memory. CSV writing is disabled in live pipeline."
-    )
 
     logger.info("Supplier features created successfully.")
 

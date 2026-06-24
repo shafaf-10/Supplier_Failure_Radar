@@ -1,4 +1,5 @@
 import pandas as pd
+from app.ml.model_thresholds import WARNING_THRESHOLDS
 
 
 FEATURE_WEIGHTS = {
@@ -12,11 +13,11 @@ FEATURE_WEIGHTS = {
 }
 
 
-def clamp(value, minimum=0.0, maximum=1.0):
+def clamp(value: float, minimum: float = 0.0, maximum: float = 1.0) -> float:
     return max(minimum, min(value, maximum))
 
 
-def get_lead_signal(row):
+def get_lead_signal(row: pd.Series) -> str:
     signals = {
         "Booking Failure": row.get("failure_rate", 0),
         "Pending Booking": row.get("pending_rate", 0),
@@ -27,10 +28,18 @@ def get_lead_signal(row):
         "Wallet Risk": row.get("wallet_risk_rate", 0),
     }
 
-    return max(signals, key=signals.get)
+    max_score = max(signals.values())
+
+    top_signals = [
+        signal
+        for signal, score in signals.items()
+        if score == max_score
+    ]
+
+    return " / ".join(sorted(top_signals))
 
 
-def calculate_future_instability_probability(row):
+def calculate_future_instability_probability(row: pd.Series) -> float:
     weighted_score = 0
 
     for feature, weight in FEATURE_WEIGHTS.items():
@@ -51,30 +60,34 @@ def calculate_future_instability_probability(row):
     return round(probability, 4)
 
 
-def get_early_warning_status(probability):
-    if probability >= 0.70:
+def get_early_warning_status(probability: float) -> str:
+    t = WARNING_THRESHOLDS
+
+    if probability >= t["CRITICAL"]:
         return "CRITICAL_WARNING"
 
-    if probability >= 0.45:
+    if probability >= t["WARNING"]:
         return "WARNING"
 
-    if probability >= 0.25:
+    if probability >= t["WATCH"]:
         return "WATCHLIST"
 
     return "STABLE"
 
 
-def get_prediction_confidence(probability):
-    if probability >= 0.70 or probability <= 0.20:
+def get_future_prediction_confidence(probability: float) -> str:
+    t = WARNING_THRESHOLDS
+
+    if probability >= t["CRITICAL"] or probability <= 0.20:
         return "HIGH"
 
-    if probability >= 0.45:
+    if probability >= t["WARNING"]:
         return "MEDIUM"
 
     return "LOW"
 
 
-def generate_future_recommendation(row):
+def generate_future_risk_recommendation(row: pd.Series) -> str:
     probability = row.get("future_instability_probability", 0)
     lead_signal = row.get("lead_signal", "Operational Risk")
     status = row.get("early_warning_status", "STABLE")
@@ -141,10 +154,10 @@ def add_future_risk_predictions(df: pd.DataFrame) -> pd.DataFrame:
 
     output["prediction_confidence"] = output[
         "future_instability_probability"
-    ].apply(get_prediction_confidence)
+    ].apply(get_future_prediction_confidence)
 
     output["future_recommendation"] = output.apply(
-        generate_future_recommendation,
+        generate_future_risk_recommendation,
         axis=1,
     )
 

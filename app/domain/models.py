@@ -1,9 +1,9 @@
 from pydantic import BaseModel
 
 
-class HealthResponse(BaseModel):
-    status: str
-    service: str
+# class HealthResponse(BaseModel):
+#     status: str
+#     service: str
 
 from sqlalchemy import (
     Column,
@@ -270,46 +270,46 @@ class WalletTransaction(Base):
     updated_at = Column(DateTime)
 
 
-class SupplierFeature(Base):
-    __tablename__ = "supplier_features"
+# class SupplierFeature(Base):
+#     __tablename__ = "supplier_features"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-    supplier_code = Column(String(50), unique=True, nullable=False)
+#     id = Column(BigInteger, primary_key=True, autoincrement=True)
+#     supplier_code = Column(String(50), unique=True, nullable=False)
 
-    total_bookings = Column(Integer)
-    successful_bookings = Column(Integer)
-    failed_bookings = Column(Integer)
-    pending_bookings = Column(Integer)
-    cancelled_bookings = Column(Integer)
+#     total_bookings = Column(Integer)
+#     successful_bookings = Column(Integer)
+#     failed_bookings = Column(Integer)
+#     pending_bookings = Column(Integer)
+#     cancelled_bookings = Column(Integer)
 
-    failure_rate = Column(Numeric(8, 4))
-    pending_rate = Column(Numeric(8, 4))
-    cancellation_rate = Column(Numeric(8, 4))
+#     failure_rate = Column(Numeric(8, 4))
+#     pending_rate = Column(Numeric(8, 4))
+#     cancellation_rate = Column(Numeric(8, 4))
 
-    process_error_rate = Column(Numeric(8, 4))
-    avg_attempts = Column(Numeric(8, 4))
+#     process_error_rate = Column(Numeric(8, 4))
+#     avg_attempts = Column(Numeric(8, 4))
 
-    refund_rate = Column(Numeric(8, 4))
-    credit_rejection_rate = Column(Numeric(8, 4))
-    search_failure_rate = Column(Numeric(8, 4))
-    wallet_risk_rate = Column(Numeric(8, 4))
+#     refund_rate = Column(Numeric(8, 4))
+#     credit_rejection_rate = Column(Numeric(8, 4))
+#     search_failure_rate = Column(Numeric(8, 4))
+#     wallet_risk_rate = Column(Numeric(8, 4))
 
-    avg_booking_amount = Column(Numeric(12, 2))
+#     avg_booking_amount = Column(Numeric(12, 2))
 
-    risk_score = Column(Numeric(8, 2))
-    risk_level = Column(String(50))
+#     risk_score = Column(Numeric(8, 2))
+#     risk_level = Column(String(50))
 
-    created_at = Column(DateTime)
-    updated_at = Column(DateTime)
+#     created_at = Column(DateTime)
+#     updated_at = Column(DateTime)
 
 
-class SupplierPrediction(Base):
-    __tablename__ = "supplier_predictions"
+# class SupplierPrediction(Base):
+#     __tablename__ = "supplier_predictions"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-    supplier_code = Column(String(50), nullable=False)
-    predicted_risk_level = Column(String(50))
-    prediction_probability = Column(Numeric(8, 4))
-    model_name = Column(String(100))
-    prediction_reason = Column(Text)
-    created_at = Column(DateTime)
+#     id = Column(BigInteger, primary_key=True, autoincrement=True)
+#     supplier_code = Column(String(50), nullable=False)
+#     predicted_risk_level = Column(String(50))
+#     prediction_probability = Column(Numeric(8, 4))
+#     model_name = Column(String(100))
+#     prediction_reason = Column(Text)
+#     created_at = Column(DateTime)

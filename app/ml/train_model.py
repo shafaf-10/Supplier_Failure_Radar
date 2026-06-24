@@ -1,4 +1,7 @@
+from app.ml.drift_detector import save_drift_baseline
+from datetime import datetime
 from pathlib import Path
+from app.ml.model_thresholds import FUTURE_FAILURE_THRESHOLDS
 
 import joblib
 import pandas as pd
@@ -21,6 +24,10 @@ MODEL_DIR = ROOT_DIR / "app" / "ml" / "models"
 RISK_MODEL_FILE = MODEL_DIR / "risk_model.pkl"
 FUTURE_MODEL_FILE = MODEL_DIR / "future_failure_model.pkl"
 ANOMALY_MODEL_FILE = MODEL_DIR / "anomaly_model.pkl"
+MODEL_REGISTRY_DIR = MODEL_DIR / "registry"
+HOLDOUT_DIR = MODEL_DIR / "holdout"
+RISK_HOLDOUT_FILE = HOLDOUT_DIR / "risk_holdout.pkl"
+FUTURE_HOLDOUT_FILE = HOLDOUT_DIR / "future_holdout.pkl"
 
 
 FEATURE_COLUMNS = [
@@ -70,41 +77,66 @@ REVERSE_LABEL_MAP = {
 }
 
 
-def validate_columns(df, columns):
+def validate_columns(df: pd.DataFrame, columns: list[str]) -> None:
     missing = [col for col in columns if col not in df.columns]
 
     if missing:
         raise ValueError(f"Missing columns: {missing}")
 
 
-def create_future_failure_target(df):
+def create_future_failure_target(df: pd.DataFrame) -> pd.Series:
+    t = FUTURE_FAILURE_THRESHOLDS
+
     future_failure = (
-        (df["risk_score"] >= 30)
+        (df["risk_score"] >= t["HIGH_RISK_SCORE"])
         | (
-            (df["risk_score"] >= 18)
+            (df["risk_score"] >= t["MEDIUM_RISK_SCORE"])
             & (
-                (df["b_failure_rate"] >= 0.08)
-                | (df["bp_error_rate"] >= 0.15)
-                | (df["ss_failure_rate"] >= 0.25)
-                | (df["ss_timeout_rate"] >= 0.18)
+                (df["b_failure_rate"] >= t["BOOKING_FAILURE_RATE"])
+                | (df["bp_error_rate"] >= t["PROCESS_ERROR_RATE"])
+                | (df["ss_failure_rate"] >= t["SEARCH_FAILURE_RATE"])
+                | (df["ss_timeout_rate"] >= t["SEARCH_TIMEOUT_RATE"])
             )
         )
         | (
-            (df["risk_score"] >= 15)
+            (df["risk_score"] >= t["LOW_SIGNAL_RISK_SCORE"])
             & (
-                (df["wt_wallet_risk_score_100"] >= 12)
-                | (df["cr_rejection_rate"] >= 0.15)
+                (df["wt_wallet_risk_score_100"] >= t["WALLET_RISK_SCORE"])
+                | (df["cr_rejection_rate"] >= t["CREDIT_REJECTION_RATE"])
             )
         )
     )
 
     return future_failure.astype(int)
 
+def save_holdout_set(
+    X_test: pd.DataFrame,
+    y_test: pd.Series,
+    file_path: Path,
+) -> None:
+    HOLDOUT_DIR.mkdir(parents=True, exist_ok=True)
 
-def evaluate_model(model, X, y, class_names):
+    holdout_data = {
+        "X_test": X_test,
+        "y_test": y_test,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+    joblib.dump(holdout_data, file_path)
+def evaluate_model(
+    model,
+    X: pd.DataFrame,
+    y: pd.Series,
+    class_names: list[str],
+) -> tuple[float, dict]:
     if len(y) < 10 or y.nunique() < 2:
         model.fit(X, y)
         preds = model.predict(X)
+        if class_names == ["LOW_RISK", "MEDIUM_RISK", "HIGH_RISK"]:
+            save_holdout_set(X, y, RISK_HOLDOUT_FILE)
+
+        if class_names == ["STABLE_NEXT_7D", "FAILURE_RISK_NEXT_7D"]:
+            save_holdout_set(X, y, FUTURE_HOLDOUT_FILE)
 
         return (
             accuracy_score(y, preds),
@@ -127,6 +159,11 @@ def evaluate_model(model, X, y, class_names):
         random_state=42,
         stratify=stratify_value,
     )
+    if class_names == ["LOW_RISK", "MEDIUM_RISK", "HIGH_RISK"]:
+        save_holdout_set(X_test, y_test, RISK_HOLDOUT_FILE)
+
+    if class_names == ["STABLE_NEXT_7D", "FAILURE_RISK_NEXT_7D"]:
+        save_holdout_set(X_test, y_test, FUTURE_HOLDOUT_FILE)
 
     model.fit(X_train, y_train)
     preds = model.predict(X_test)
@@ -147,7 +184,11 @@ def evaluate_model(model, X, y, class_names):
     return accuracy, report
 
 
-def train_best_classifier(X, y, class_names):
+def train_best_classifier(
+    X: pd.DataFrame,
+    y: pd.Series,
+    class_names: list[str],
+) -> tuple[str, object, float]:
     models = {
         "RandomForest": RandomForestClassifier(
             n_estimators=300,
@@ -179,15 +220,23 @@ def train_best_classifier(X, y, class_names):
     return best_model_name, best_model, best_accuracy
 
 
-def train_models():
+def train_models() -> None:
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    MODEL_REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    versioned_risk_model_file = MODEL_REGISTRY_DIR / f"risk_model_{timestamp}.pkl"
+    versioned_future_model_file = MODEL_REGISTRY_DIR / f"future_failure_model_{timestamp}.pkl"
+    versioned_anomaly_model_file = MODEL_REGISTRY_DIR / f"anomaly_model_{timestamp}.pkl"
 
     print("Building supplier features in memory...")
-    df = build_supplier_features(persist=False)
+    df = build_supplier_features(days=None)
     df = df.fillna(0).copy()
 
     validate_columns(df, FEATURE_COLUMNS)
     validate_columns(df, ANOMALY_FEATURES)
+    save_drift_baseline(df, FEATURE_COLUMNS)
 
     if "risk_level" not in df.columns:
         raise ValueError("risk_level column missing.")
@@ -216,6 +265,8 @@ def train_models():
     }
 
     joblib.dump(risk_bundle, RISK_MODEL_FILE)
+    joblib.dump(risk_bundle, versioned_risk_model_file)
+    joblib.dump(risk_bundle, versioned_risk_model_file)
 
     df["future_failure_7d"] = create_future_failure_target(df)
     y_future = df["future_failure_7d"].astype(int)
@@ -235,6 +286,7 @@ def train_models():
     }
 
     joblib.dump(future_bundle, FUTURE_MODEL_FILE)
+    joblib.dump(future_bundle, versioned_future_model_file)
 
     X_anomaly = df[ANOMALY_FEATURES].fillna(0)
 
@@ -246,6 +298,7 @@ def train_models():
 
     anomaly_model.fit(X_anomaly)
     joblib.dump(anomaly_model, ANOMALY_MODEL_FILE)
+    joblib.dump(anomaly_model, versioned_anomaly_model_file)
 
     print("Production ML training completed successfully.")
     print(f"Risk model saved to: {RISK_MODEL_FILE}")
