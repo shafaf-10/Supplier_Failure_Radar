@@ -30,9 +30,8 @@ class CacheAdapter:
     @staticmethod
     def clear_supplier_predictions() -> None:
         """
-        Clear supplier prediction cache keys.
-        Current Redis adapter supports deleting one key at a time.
-        """
+Clear supplier prediction cache keys by deleting the known cache entries.
+"""
         delete_cache("supplier_predictions:all")
         delete_cache("supplier_predictions:24h")
         delete_cache("supplier_predictions:7d")

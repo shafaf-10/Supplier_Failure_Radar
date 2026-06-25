@@ -57,7 +57,7 @@ app = FastAPI(
 
 app.middleware("http")(error_handler_middleware)
 app.middleware("http")(request_logger_middleware)
-# app.middleware("http")(database_middleware)
+
 
 app.add_middleware(
     CORSMiddleware,

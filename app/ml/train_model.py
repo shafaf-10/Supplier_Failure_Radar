@@ -266,7 +266,6 @@ def train_models() -> None:
 
     joblib.dump(risk_bundle, RISK_MODEL_FILE)
     joblib.dump(risk_bundle, versioned_risk_model_file)
-    joblib.dump(risk_bundle, versioned_risk_model_file)
 
     df["future_failure_7d"] = create_future_failure_target(df)
     y_future = df["future_failure_7d"].astype(int)

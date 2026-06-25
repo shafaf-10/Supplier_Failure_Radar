@@ -70,17 +70,3 @@ def delete_cache(key):
         return
 
 
-def clear_supplier_cache():
-    if redis_client is None:
-        return
-
-    try:
-        keys = redis_client.keys(
-            "supplier_predictions:*"
-        )
-
-        for key in keys:
-            redis_client.delete(key)
-
-    except Exception:
-        return
