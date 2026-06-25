@@ -23,14 +23,6 @@ def safe_rate(num, den):
             return 0
         return num / den
 
-
-def normalise(series):
-    mn = series.min()
-    mx = series.max()
-
-    return (series - mn) / (mx - mn + 1e-9)
-
-
 def left_merge(base, right, on="supplier_code"):
     if right is None or right.empty:
         return base

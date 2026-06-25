@@ -33,9 +33,6 @@ def build_wallet_features(wallet_transactions, days=None):
     wallets["wt_failed_payment_flag"] = wallet_type.eq("FAILED_PAYMENT").astype(int)
     wallets["wt_hold_flag"] = wallet_type.eq("HOLD").astype(int)
     wallets["wt_debit_flag"] = wallet_type.eq("DEBIT").astype(int)
-    wallets["wt_credit_flag"] = wallet_type.eq("CREDIT").astype(int)
-    wallets["wt_release_flag"] = wallet_type.eq("RELEASE").astype(int)
-
     wallets["wt_negative_closing_balance_flag"] = (
         wallets["closing_balance"].fillna(0) < 0
     ).astype(int)
@@ -45,8 +42,6 @@ def build_wallet_features(wallet_transactions, days=None):
         wt_failed_payment=("wt_failed_payment_flag", "sum"),
         wt_hold=("wt_hold_flag", "sum"),
         wt_debit=("wt_debit_flag", "sum"),
-        wt_credit=("wt_credit_flag", "sum"),
-        wt_release=("wt_release_flag", "sum"),
         wt_negative_closing_balance=("wt_negative_closing_balance_flag", "sum"),
         wt_amount_sum=("amount", "sum"),
         wt_amount_mean=("amount", "mean"),

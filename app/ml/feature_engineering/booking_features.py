@@ -75,11 +75,6 @@ def build_booking_features(bookings, days=None):
         total,
     ).fillna(0)
 
-    booking_agg["b_success_rate"] = safe_rate(
-        booking_agg["b_issued"],
-        total,
-    ).fillna(0)
-
     booking_agg["b_cancellation_rate"] = safe_rate(
         booking_agg["b_cancelled"],
         total,
@@ -90,10 +85,6 @@ def build_booking_features(bookings, days=None):
         total,
     ).fillna(0)
 
-    booking_agg["b_failure_pending_combo"] = (
-        booking_agg["b_failure_rate"]
-        + booking_agg["b_pending_rate"]
-    )
 
     booking_agg["b_estimated_failure_loss"] = (
         booking_agg["b_failure_rate"]

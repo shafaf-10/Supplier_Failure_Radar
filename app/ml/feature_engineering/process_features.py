@@ -80,10 +80,6 @@ def build_process_features(booking_processes, days=None):
         total,
     ).fillna(0)
 
-    process_agg["bp_completion_rate"] = safe_rate(
-        process_agg["bp_completed"],
-        total,
-    ).fillna(0)
 
     process_agg["bp_high_retry_rate"] = safe_rate(
         process_agg["bp_high_retry"],

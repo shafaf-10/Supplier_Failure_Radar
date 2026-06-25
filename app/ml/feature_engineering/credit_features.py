@@ -65,11 +65,6 @@ def build_credit_features(credit_requests, days=None):
         total,
     ).fillna(0)
 
-    credit_features["cr_approval_rate"] = safe_rate(
-        credit_features["cr_approved"],
-        total,
-    ).fillna(0)
-
     credit_features["cr_credit_risk_score_100"] = (
         credit_features["cr_rejection_rate"] * 35
         + credit_features["cr_overdue_rate"] * 35

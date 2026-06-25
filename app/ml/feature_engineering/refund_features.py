@@ -80,10 +80,6 @@ def build_refund_features(refund_requests, bookings, days=None):
         total,
     ).fillna(0)
 
-    refund_features["rr_refunded_rate"] = safe_rate(
-        refund_features["rr_refunded"],
-        total,
-    ).fillna(0)
 
     refund_features["rr_amount_recovery_rate"] = safe_rate(
         refund_features["rr_refunded_amount_sum"],

@@ -30,15 +30,6 @@ class CacheAdapter:
     @staticmethod
     def clear_supplier_predictions() -> None:
         """
-        Clear cached supplier prediction results.
-        Safe method used after model refresh.
-        """
-        CacheAdapter._cache.pop("supplier_predictions", None)
-
-
-    @staticmethod
-    def clear_supplier_predictions() -> None:
-        """
         Clear supplier prediction cache keys.
         Current Redis adapter supports deleting one key at a time.
         """

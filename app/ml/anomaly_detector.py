@@ -11,7 +11,7 @@ logger = setup_logger(__name__)
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
-FEATURE_FILE = ROOT_DIR / "outputs" / "supplier_features.csv"
+
 MODEL_FILE = ROOT_DIR / "app" / "ml" / "models" / "risk_model.pkl"
 FUTURE_MODEL_FILE = ROOT_DIR / "app" / "ml" / "models" / "future_failure_model.pkl"
 ANOMALY_MODEL_FILE = ROOT_DIR / "app" / "ml" / "models" / "anomaly_model.pkl"
@@ -189,20 +189,14 @@ def apply_ml_future_failure_prediction(df):
     return df
 
 
-def load_features(features_df=None):
-    if features_df is not None:
-        logger.info("Using in-memory supplier features from pipeline.")
-        return features_df.fillna(0).copy()
-
-    logger.info("Loading supplier features from file: %s", FEATURE_FILE)
-
-    if not FEATURE_FILE.exists():
-        raise FileNotFoundError(
-            f"Feature file not found: {FEATURE_FILE}. "
-            "Pass features_df from pipeline or run offline debug feature export."
+def load_features(features_df):
+    if features_df is None:
+        raise ValueError(
+            "features_df is required. Live pipeline must pass in-memory supplier features."
         )
 
-    return pd.read_csv(FEATURE_FILE).fillna(0).copy()
+    logger.info("Using in-memory supplier features from pipeline.")
+    return features_df.fillna(0).copy()
 
 
 def load_anomaly_model():

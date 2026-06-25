@@ -15,8 +15,6 @@ class Settings(BaseSettings):
     APP_NAME: str = "Supplier Failure Radar"
     DEBUG: bool = False
 
-    MODEL_PATH: str = "app/ml/models/risk_model.pkl"
-    FEATURE_PATH: str = "outputs/supplier_features.csv"
 
     class Config:
         env_file = ".env"

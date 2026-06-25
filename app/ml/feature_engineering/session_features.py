@@ -72,10 +72,6 @@ def build_session_features(search_sessions, days=None):
         total,
     ).fillna(0)
 
-    session_features["ss_completion_rate"] = safe_rate(
-        session_features["ss_completed"],
-        total,
-    ).fillna(0)
 
     session_features["supplier_session_risk_score_100"] = (
         session_features["ss_failure_rate"] * 30

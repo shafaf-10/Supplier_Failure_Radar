@@ -20,7 +20,7 @@ logger = setup_logger(__name__)
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
-OUTPUT_FILE = ROOT_DIR / "outputs" / "supplier_features.csv"
+
 
 
 ALLOWED_TABLES = {
