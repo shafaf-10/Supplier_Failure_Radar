@@ -1,23 +1,34 @@
 from datetime import datetime
+import threading
+import time
 
 import pandas as pd
 
 from app.ml.pipeline import run_prediction_pipeline
 from app.services.cache_adapter import CacheAdapter
 from app.observability.logger import setup_logger
+from app.services.webhook_service import send_webhook
+from app.observability.metrics import (
+    prediction_runs_total,
+    cache_hits_total,
+    cache_misses_total,
+    pipeline_duration_seconds,
+)
 
 
 logger = setup_logger(__name__)
+_pipeline_lock = threading.Lock()
 
 
 class SupplierPredictionService:
     CACHE_PREFIX = "supplier_predictions"
+
     PERIOD_TO_DAYS = {
-    "24h": 1,
-    "7d": 7,
-    "30d": 30,
-    "1y": 365,
-    "all": None,
+        "24h": 1,
+        "7d": 7,
+        "30d": 30,
+        "1y": 365,
+        "all": None,
     }
 
     @classmethod
@@ -44,7 +55,6 @@ class SupplierPredictionService:
             "supplier_code": row.get("supplier_code"),
             "supplier_name": row.get("supplier_name"),
             "total_bookings": cls._to_int(row.get("total_bookings")),
-
             "risk_score": round(cls._to_float(row.get("risk_score")), 2),
             "risk_level": row.get("risk_level"),
             "predicted_risk": row.get("predicted_risk"),
@@ -52,15 +62,9 @@ class SupplierPredictionService:
                 cls._to_float(row.get("prediction_probability")),
                 4,
             ),
-
             "anomaly_status": row.get("anomaly_status"),
-            "anomaly_score": round(
-                cls._to_float(row.get("anomaly_score")),
-                6,
-            ),
-
+            "anomaly_score": round(cls._to_float(row.get("anomaly_score")), 6),
             "recommendation": row.get("recommendation"),
-
             "future_instability_probability": round(
                 cls._to_float(row.get("future_instability_probability")),
                 4,
@@ -70,7 +74,6 @@ class SupplierPredictionService:
             "lead_signal": row.get("lead_signal"),
             "prediction_confidence": row.get("prediction_confidence"),
             "future_recommendation": row.get("future_recommendation"),
-
             "failure_rate": round(cls._to_float(row.get("failure_rate")), 4),
             "pending_rate": round(cls._to_float(row.get("pending_rate")), 4),
             "cancellation_rate": round(
@@ -94,7 +97,6 @@ class SupplierPredictionService:
                 cls._to_float(row.get("wallet_risk_rate")),
                 4,
             ),
-
             "created_at": datetime.now().isoformat(timespec="seconds"),
         }
 
@@ -105,20 +107,16 @@ class SupplierPredictionService:
         return {
             "total_suppliers": total,
             "high_risk_suppliers": sum(
-                1 for s in suppliers
-                if s["risk_level"] == "HIGH_RISK"
+                1 for s in suppliers if s["risk_level"] == "HIGH_RISK"
             ),
             "medium_risk_suppliers": sum(
-                1 for s in suppliers
-                if s["risk_level"] == "MEDIUM_RISK"
+                1 for s in suppliers if s["risk_level"] == "MEDIUM_RISK"
             ),
             "low_risk_suppliers": sum(
-                1 for s in suppliers
-                if s["risk_level"] == "LOW_RISK"
+                1 for s in suppliers if s["risk_level"] == "LOW_RISK"
             ),
             "anomaly_suppliers": sum(
-                1 for s in suppliers
-                if s["anomaly_status"] == "ANOMALY"
+                1 for s in suppliers if s["anomaly_status"] == "ANOMALY"
             ),
             "critical_future_warnings": sum(
                 1 for s in suppliers
@@ -126,10 +124,7 @@ class SupplierPredictionService:
             ),
             "warning_suppliers": sum(
                 1 for s in suppliers
-                if s["early_warning_status"] in [
-                    "WARNING",
-                    "CRITICAL_WARNING",
-                ]
+                if s["early_warning_status"] in ["WARNING", "CRITICAL_WARNING"]
             ),
             "average_risk_score": round(
                 sum(float(s["risk_score"] or 0) for s in suppliers) / total,
@@ -140,8 +135,7 @@ class SupplierPredictionService:
                     sum(
                         float(s["future_instability_probability"] or 0)
                         for s in suppliers
-                    )
-                    / total
+                    ) / total
                 ) * 100,
                 2,
             ) if total else 0,
@@ -153,58 +147,104 @@ class SupplierPredictionService:
 
         cached = CacheAdapter.get(cache_key)
         if cached:
+            cache_hits_total.inc()
             logger.info("Returning supplier predictions from Redis cache.")
             return cached
 
-        logger.info("Cache miss. Running supplier prediction pipeline in memory.")
+        cache_misses_total.inc()
+        logger.info("Cache miss. Waiting for pipeline lock.")
 
-        days = cls.PERIOD_TO_DAYS.get(period, 30)
-        prediction_df = run_prediction_pipeline(days=days)
+        with _pipeline_lock:
+            cached = CacheAdapter.get(cache_key)
+            if cached:
+                cache_hits_total.inc()
+                logger.info("Cache filled by another request. Returning cached data.")
+                return cached
 
-        if prediction_df is None or prediction_df.empty:
+            logger.info("Running supplier prediction pipeline in memory.")
+
+            days = cls.PERIOD_TO_DAYS.get(period, 30)
+            start_time = time.time()
+            prediction_runs_total.inc()
+
+            try:
+                prediction_df = run_prediction_pipeline(days=days)
+                pipeline_duration_seconds.observe(time.time() - start_time)
+
+            except Exception as error:
+                pipeline_duration_seconds.observe(time.time() - start_time)
+
+                logger.exception(
+                    "Pipeline failed. Trying stale cached data. Error: %s",
+                    error,
+                )
+
+                stale_cached = CacheAdapter.get(cache_key)
+                if stale_cached:
+                    stale_cached["warning"] = (
+                        "Pipeline failed. Serving cached prediction data."
+                    )
+                    return stale_cached
+
+                raise
+
+            if prediction_df is None or prediction_df.empty:
+                response = {
+                    "period": period,
+                    "latest_date": None,
+                    "summary": cls._build_summary([]),
+                    "suppliers": [],
+                }
+
+                CacheAdapter.set(
+                    cache_key,
+                    response,
+                    expiry_seconds=300,
+                )
+
+                return response
+
+            prediction_df = prediction_df.sort_values(
+                by="risk_score",
+                ascending=False,
+            )
+
+            suppliers = [
+                cls._clean_supplier_record(row)
+                for row in prediction_df.to_dict(orient="records")
+            ]
+
+            for supplier in suppliers:
+                if supplier["early_warning_status"] == "CRITICAL_WARNING":
+                    send_webhook(
+                        {
+                            "supplier_code": supplier["supplier_code"],
+                            "supplier_name": supplier["supplier_name"],
+                            "risk_level": supplier["risk_level"],
+                            "future_probability": supplier[
+                                "future_instability_probability"
+                            ],
+                        }
+                    )
+
+            latest_date = datetime.now().isoformat(timespec="seconds")
+
             response = {
                 "period": period,
-                "latest_date": None,
-                "summary": cls._build_summary([]),
-                "suppliers": [],
+                "latest_date": latest_date,
+                "summary": cls._build_summary(suppliers),
+                "suppliers": suppliers,
             }
 
             CacheAdapter.set(
-            cache_key,
-            response,
-            expiry_seconds=300,
-)
+                cache_key,
+                response,
+                expiry_seconds=60,
+            )
+
+            logger.info("Supplier predictions generated and cached successfully.")
 
             return response
-
-        prediction_df = prediction_df.sort_values(
-            by="risk_score",
-            ascending=False,
-        )
-
-        suppliers = [
-            cls._clean_supplier_record(row)
-            for row in prediction_df.to_dict(orient="records")
-        ]
-
-        latest_date = datetime.now().isoformat(timespec="seconds")
-
-        response = {
-            "period": period,
-            "latest_date": latest_date,
-            "summary": cls._build_summary(suppliers),
-            "suppliers": suppliers,
-        }
-
-        CacheAdapter.set(
-            cache_key,
-            response,
-            expiry_seconds=60,
-        )
-
-        logger.info("Supplier predictions generated and cached successfully.")
-
-        return response
 
     @classmethod
     def clear_cache(cls):

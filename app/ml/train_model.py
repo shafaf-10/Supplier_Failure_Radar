@@ -2,9 +2,10 @@ from app.ml.drift_detector import save_drift_baseline
 from datetime import datetime
 from pathlib import Path
 from app.ml.model_thresholds import FUTURE_FAILURE_THRESHOLDS
-
+from app.infra.paths import MODEL_DIR
 import joblib
 import pandas as pd
+from app.ml.holdout_manager import save_holdout_set
 
 from sklearn.ensemble import (
     RandomForestClassifier,
@@ -13,14 +14,8 @@ from sklearn.ensemble import (
 )
 from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split
-
 from app.ml.feature_builder import build_supplier_features
 from app.ml.anomaly_detector import ANOMALY_FEATURES
-
-
-ROOT_DIR = Path(__file__).resolve().parents[2]
-
-MODEL_DIR = ROOT_DIR / "app" / "ml" / "models"
 RISK_MODEL_FILE = MODEL_DIR / "risk_model.pkl"
 FUTURE_MODEL_FILE = MODEL_DIR / "future_failure_model.pkl"
 ANOMALY_MODEL_FILE = MODEL_DIR / "anomaly_model.pkl"
@@ -109,20 +104,7 @@ def create_future_failure_target(df: pd.DataFrame) -> pd.Series:
 
     return future_failure.astype(int)
 
-def save_holdout_set(
-    X_test: pd.DataFrame,
-    y_test: pd.Series,
-    file_path: Path,
-) -> None:
-    HOLDOUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    holdout_data = {
-        "X_test": X_test,
-        "y_test": y_test,
-        "created_at": datetime.now().isoformat(timespec="seconds"),
-    }
-
-    joblib.dump(holdout_data, file_path)
 def evaluate_model(
     model,
     X: pd.DataFrame,
@@ -220,7 +202,7 @@ def train_best_classifier(
     return best_model_name, best_model, best_accuracy
 
 
-def train_models() -> None:
+def train_models(df: pd.DataFrame | None = None) -> None:
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     MODEL_REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -230,8 +212,10 @@ def train_models() -> None:
     versioned_future_model_file = MODEL_REGISTRY_DIR / f"future_failure_model_{timestamp}.pkl"
     versioned_anomaly_model_file = MODEL_REGISTRY_DIR / f"anomaly_model_{timestamp}.pkl"
 
-    print("Building supplier features in memory...")
-    df = build_supplier_features(days=None)
+    if df is None:
+        print("Building supplier features in memory...")
+        df = build_supplier_features(days=None)
+
     df = df.fillna(0).copy()
 
     validate_columns(df, FEATURE_COLUMNS)

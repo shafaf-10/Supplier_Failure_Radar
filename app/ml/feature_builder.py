@@ -1,11 +1,6 @@
-import os
-from pathlib import Path
-
 import pandas as pd
 from sqlalchemy import text
-
 from app.infra.database import engine
-
 from app.ml.feature_engineering.booking_features import build_booking_features
 from app.ml.feature_engineering.process_features import build_process_features
 from app.ml.feature_engineering.ticketing_features import build_ticketing_features
@@ -16,12 +11,8 @@ from app.ml.feature_engineering.wallet_features import build_wallet_features
 from app.ml.feature_engineering.build_master import build_master_supplier_table
 from app.observability.logger import setup_logger
 from app.ml.model_thresholds import RISK_SCORE_THRESHOLDS
+from app.ml.schema_validation import validate_table_schema
 logger = setup_logger(__name__)
-
-
-ROOT_DIR = Path(__file__).resolve().parents[2]
-
-
 
 ALLOWED_TABLES = {
     "suppliers",
@@ -188,11 +179,33 @@ def build_supplier_features(days=None):
     bookings = read_table("bookings", days=days)
     booking_processes = read_table("booking_processes", days=days)
     booking_flights = read_table("booking_flights", days=days)
-    booking_passengers = read_table("booking_passengers")
-    search_sessions = read_table("search_sessions", days=days)
+    if days is not None:
+        booking_ids = bookings["id"].tolist()
+
+        if booking_ids:
+            booking_passengers = pd.read_sql(
+                text("SELECT * FROM booking_passengers WHERE booking_id IN :booking_ids"),
+                engine,
+                params={"booking_ids": tuple(booking_ids)},
+        )
+        else:
+            booking_passengers = pd.DataFrame()
+    else:
+        booking_passengers = read_table("booking_passengers")
+        search_sessions = read_table("search_sessions", days=days)
     refund_requests = read_table("refund_requests", days=days)
     credit_requests = read_table("credit_requests", days=days)
     wallet_transactions = read_table("wallet_transactions", days=days)
+
+    validate_table_schema("suppliers", suppliers)
+    validate_table_schema("bookings", bookings)
+    validate_table_schema("booking_processes", booking_processes)
+    validate_table_schema("booking_flights", booking_flights)
+    validate_table_schema("booking_passengers", booking_passengers)
+    validate_table_schema("search_sessions", search_sessions)
+    validate_table_schema("refund_requests", refund_requests)
+    validate_table_schema("credit_requests", credit_requests)
+    validate_table_schema("wallet_transactions", wallet_transactions)
 
     logger.info("Building supplier feature groups.")
 
@@ -279,5 +292,4 @@ def build_supplier_features(days=None):
     return features
 
 
-if __name__ == "__main__":
-    build_supplier_features()
+

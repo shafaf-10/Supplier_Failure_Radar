@@ -1,21 +1,22 @@
-from pathlib import Path
-
+from app.infra.paths import MODEL_DIR
 import joblib
 import pandas as pd
 
 from app.ml.future_risk_predictor import add_future_risk_predictions
+from app.ml.future_risk_predictor import (
+    get_early_warning_status,
+    get_future_prediction_confidence,
+)
+from app.ml.prediction_recommendations import get_recommendation
 from app.observability.logger import setup_logger
 
 
 logger = setup_logger(__name__)
 
-ROOT_DIR = Path(__file__).resolve().parents[2]
 
-
-MODEL_FILE = ROOT_DIR / "app" / "ml" / "models" / "risk_model.pkl"
-FUTURE_MODEL_FILE = ROOT_DIR / "app" / "ml" / "models" / "future_failure_model.pkl"
-ANOMALY_MODEL_FILE = ROOT_DIR / "app" / "ml" / "models" / "anomaly_model.pkl"
-
+MODEL_FILE = MODEL_DIR / "risk_model.pkl"
+FUTURE_MODEL_FILE = MODEL_DIR / "future_failure_model.pkl"
+ANOMALY_MODEL_FILE = MODEL_DIR / "anomaly_model.pkl"
 
 ANOMALY_FEATURES = [
     "b_failure_rate",
@@ -53,58 +54,12 @@ def validate_columns(df, columns):
         )
 
 
-def get_recommendation(row):
-    if row["anomaly_status"] == "ANOMALY":
-        return (
-            "Immediate investigation required. Check booking failure spikes, "
-            "supplier API retries, ticketing SLA misses, refund delay, "
-            "search timeout, credit exposure, and wallet failed payments."
-        )
-
-    if row["risk_level"] == "HIGH_RISK":
-        return (
-            "Supplier is high risk. Reduce dependency, monitor ticketing SLA, "
-            "refund delays, high retries, and wallet exposure."
-        )
-
-    if row["risk_level"] == "MEDIUM_RISK":
-        return (
-            "Supplier needs monitoring. Watch booking pending rate, process retry, "
-            "search completion gap, refund pending rate, and wallet holds."
-        )
-
-    return "Supplier is stable. Continue normal monitoring."
-
-
 def get_risk_prediction_probability(model, x_values):
     if hasattr(model, "predict_proba"):
         probabilities = model.predict_proba(x_values)
         return probabilities.max(axis=1)
 
     return [0.0] * len(x_values)
-
-
-def get_warning_status(probability):
-    if probability >= 0.70:
-        return "CRITICAL_WARNING"
-
-    if probability >= 0.45:
-        return "WARNING"
-
-    if probability >= 0.25:
-        return "WATCHLIST"
-
-    return "STABLE"
-
-
-def get_prediction_confidence(probability):
-    if probability >= 0.70 or probability <= 0.20:
-        return "HIGH"
-
-    if probability >= 0.45:
-        return "MEDIUM"
-
-    return "LOW"
 
 
 def build_ml_future_recommendation(row):
@@ -175,11 +130,11 @@ def apply_ml_future_failure_prediction(df):
 
     df["early_warning_status"] = df[
         "future_instability_probability"
-    ].apply(get_warning_status)
+    ].apply(get_early_warning_status)
 
     df["prediction_confidence"] = df[
         "future_instability_probability"
-    ].apply(get_prediction_confidence)
+    ].apply(get_future_prediction_confidence)
 
     df["future_recommendation"] = df.apply(
         build_ml_future_recommendation,
@@ -258,7 +213,10 @@ def detect_anomalies(features_df=None):
     ]
 
     df["recommendation"] = df.apply(
-        get_recommendation,
+        lambda row: get_recommendation(
+            row["risk_level"],
+            row["anomaly_status"],
+        ),
         axis=1,
     )
 
@@ -305,7 +263,3 @@ def detect_anomalies(features_df=None):
     )
 
     return result
-
-
-if __name__ == "__main__":
-    detect_anomalies()

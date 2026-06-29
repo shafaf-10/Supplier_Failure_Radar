@@ -23,9 +23,7 @@ class CacheAdapter:
             expiry_seconds,
         )
 
-    @staticmethod
-    def delete(key):
-        return delete_cache(key)
+
     
     @staticmethod
     def clear_supplier_predictions() -> None:

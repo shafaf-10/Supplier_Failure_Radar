@@ -40,5 +40,3 @@ def run_prediction_pipeline(days: int | None = 30) -> pd.DataFrame:
     return prediction_df
 
 
-if __name__ == "__main__":
-    run_prediction_pipeline()

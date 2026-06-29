@@ -1,4 +1,7 @@
 import json
+from app.observability.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 try:
     import redis
@@ -58,7 +61,7 @@ def set_cache(key, value, expiry_seconds=300):
         )
 
     except Exception as error:
-        print(f"REDIS ERROR: {error}")
+        logger.warning("Redis get failed: %s", error)
 
 def delete_cache(key):
     if redis_client is None:
