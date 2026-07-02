@@ -1,25 +1,37 @@
-from app.ml.drift_detector import save_drift_baseline
 from datetime import datetime
-from pathlib import Path
-from app.ml.model_thresholds import FUTURE_FAILURE_THRESHOLDS
-from app.infra.paths import MODEL_DIR
+
 import joblib
 import pandas as pd
-from app.ml.holdout_manager import save_holdout_set
-
 from sklearn.ensemble import (
-    RandomForestClassifier,
     GradientBoostingClassifier,
     IsolationForest,
+    RandomForestClassifier,
 )
 from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split
-from app.ml.feature_builder import build_supplier_features
+
+from app.infra.paths import MODEL_DIR
 from app.ml.anomaly_detector import ANOMALY_FEATURES
+from app.ml.drift_detector import save_drift_baseline
+from app.ml.feature_builder import build_supplier_features
+from app.ml.holdout_manager import save_holdout_set
+from app.ml.model_thresholds import (
+    ANOMALY_CONFIG,
+    CLASSIFIER_CONFIG,
+    FUTURE_FAILURE_THRESHOLDS,
+    MODEL_VERSION_CONFIG,
+)
+from app.observability.logger import setup_logger
+
+logger = setup_logger(__name__)
+
 RISK_MODEL_FILE = MODEL_DIR / "risk_model.pkl"
 FUTURE_MODEL_FILE = MODEL_DIR / "future_failure_model.pkl"
 ANOMALY_MODEL_FILE = MODEL_DIR / "anomaly_model.pkl"
+
 MODEL_REGISTRY_DIR = MODEL_DIR / "registry"
+MAX_MODEL_VERSIONS = MODEL_VERSION_CONFIG["MAX_MODEL_VERSIONS"]
+
 HOLDOUT_DIR = MODEL_DIR / "holdout"
 RISK_HOLDOUT_FILE = HOLDOUT_DIR / "risk_holdout.pkl"
 FUTURE_HOLDOUT_FILE = HOLDOUT_DIR / "future_holdout.pkl"
@@ -114,6 +126,7 @@ def evaluate_model(
     if len(y) < 10 or y.nunique() < 2:
         model.fit(X, y)
         preds = model.predict(X)
+
         if class_names == ["LOW_RISK", "MEDIUM_RISK", "HIGH_RISK"]:
             save_holdout_set(X, y, RISK_HOLDOUT_FILE)
 
@@ -137,10 +150,11 @@ def evaluate_model(
     X_train, X_test, y_train, y_test = train_test_split(
         X,
         y,
-        test_size=0.30,
-        random_state=42,
+        test_size=CLASSIFIER_CONFIG["TEST_SIZE"],
+        random_state=CLASSIFIER_CONFIG["RANDOM_STATE"],
         stratify=stratify_value,
     )
+
     if class_names == ["LOW_RISK", "MEDIUM_RISK", "HIGH_RISK"]:
         save_holdout_set(X_test, y_test, RISK_HOLDOUT_FILE)
 
@@ -173,12 +187,12 @@ def train_best_classifier(
 ) -> tuple[str, object, float]:
     models = {
         "RandomForest": RandomForestClassifier(
-            n_estimators=300,
-            random_state=42,
+            n_estimators=CLASSIFIER_CONFIG["N_ESTIMATORS"],
+            random_state=CLASSIFIER_CONFIG["RANDOM_STATE"],
             class_weight="balanced",
         ),
         "GradientBoosting": GradientBoostingClassifier(
-            random_state=42,
+            random_state=CLASSIFIER_CONFIG["RANDOM_STATE"],
         ),
     }
 
@@ -202,6 +216,18 @@ def train_best_classifier(
     return best_model_name, best_model, best_accuracy
 
 
+def cleanup_old_model_versions(pattern: str) -> None:
+    model_files = sorted(
+        MODEL_REGISTRY_DIR.glob(pattern),
+        key=lambda file: file.stat().st_mtime,
+        reverse=True,
+    )
+
+    for old_file in model_files[MAX_MODEL_VERSIONS:]:
+        old_file.unlink()
+        logger.info("Deleted old model version: %s", old_file)
+
+
 def train_models(df: pd.DataFrame | None = None) -> None:
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     MODEL_REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
@@ -213,7 +239,7 @@ def train_models(df: pd.DataFrame | None = None) -> None:
     versioned_anomaly_model_file = MODEL_REGISTRY_DIR / f"anomaly_model_{timestamp}.pkl"
 
     if df is None:
-        print("Building supplier features in memory...")
+        logger.info("Building supplier features in memory...")
         df = build_supplier_features(days=None)
 
     df = df.fillna(0).copy()
@@ -274,26 +300,28 @@ def train_models(df: pd.DataFrame | None = None) -> None:
     X_anomaly = df[ANOMALY_FEATURES].fillna(0)
 
     anomaly_model = IsolationForest(
-        n_estimators=300,
-        contamination=0.20,
-        random_state=42,
+        n_estimators=ANOMALY_CONFIG["N_ESTIMATORS"],
+        contamination=ANOMALY_CONFIG["CONTAMINATION"],
+        random_state=ANOMALY_CONFIG["RANDOM_STATE"],
     )
 
     anomaly_model.fit(X_anomaly)
     joblib.dump(anomaly_model, ANOMALY_MODEL_FILE)
     joblib.dump(anomaly_model, versioned_anomaly_model_file)
 
-    print("Production ML training completed successfully.")
-    print(f"Risk model saved to: {RISK_MODEL_FILE}")
-    print(f"Future model saved to: {FUTURE_MODEL_FILE}")
-    print(f"Anomaly model saved to: {ANOMALY_MODEL_FILE}")
-    print(f"Risk accuracy: {risk_accuracy:.4f}")
-    print(f"Future accuracy: {future_accuracy:.4f}")
+    cleanup_old_model_versions("risk_model_*.pkl")
+    cleanup_old_model_versions("future_failure_model_*.pkl")
+    cleanup_old_model_versions("anomaly_model_*.pkl")
 
-    print("\nCreated model files:")
-    print("- risk_model.pkl")
-    print("- future_failure_model.pkl")
-    print("- anomaly_model.pkl")
+    logger.info("Production ML training completed successfully.")
+    logger.info("Risk model saved to: %s", RISK_MODEL_FILE)
+    logger.info("Future model saved to: %s", FUTURE_MODEL_FILE)
+    logger.info("Anomaly model saved to: %s", ANOMALY_MODEL_FILE)
+    logger.info("Risk accuracy: %.4f", risk_accuracy)
+    logger.info("Future accuracy: %.4f", future_accuracy)
+    logger.info(
+        "Created model files: risk_model.pkl, future_failure_model.pkl, anomaly_model.pkl"
+    )
 
 
 if __name__ == "__main__":

@@ -11,6 +11,20 @@ WINDOW_SECONDS = 60
 _request_log = defaultdict(deque)
 
 
+def cleanup_old_clients(now: float) -> None:
+    expired_clients = []
+
+    for client_ip, timestamps in _request_log.items():
+        while timestamps and now - timestamps[0] > WINDOW_SECONDS:
+            timestamps.popleft()
+
+        if not timestamps:
+            expired_clients.append(client_ip)
+
+    for client_ip in expired_clients:
+        del _request_log[client_ip]
+
+
 async def rate_limit_middleware(
     request: Request,
     call_next,
@@ -18,10 +32,9 @@ async def rate_limit_middleware(
     client_ip = request.client.host if request.client else "unknown"
     now = time.time()
 
-    timestamps = _request_log[client_ip]
+    cleanup_old_clients(now)
 
-    while timestamps and now - timestamps[0] > WINDOW_SECONDS:
-        timestamps.popleft()
+    timestamps = _request_log[client_ip]
 
     if len(timestamps) >= RATE_LIMIT:
         return JSONResponse(

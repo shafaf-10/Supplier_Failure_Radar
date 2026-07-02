@@ -1,4 +1,6 @@
 import json
+
+from app.infra.settings import settings
 from app.observability.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -7,8 +9,6 @@ try:
     import redis
 except Exception:
     redis = None
-
-from app.infra.settings import settings
 
 
 redis_client = None
@@ -26,7 +26,8 @@ try:
 
         redis_client.ping()
 
-except Exception:
+except Exception as error:
+    logger.warning("Redis connection failed: %s", error)
     redis_client = None
 
 
@@ -42,17 +43,18 @@ def get_cache(key):
 
         return json.loads(data)
 
-    except Exception:
+    except Exception as error:
+        logger.warning("Redis get failed for key %s: %s", key, error)
         return None
 
 
 def set_cache(key, value, expiry_seconds=300):
     if redis_client is None:
-        print("REDIS NOT CONNECTED")
+        logger.warning("Redis not connected. Cache set skipped for key: %s", key)
         return
 
     try:
-        print(f"WRITING TO REDIS: {key}")
+        logger.info("Writing to Redis cache key: %s", key)
 
         redis_client.setex(
             key,
@@ -61,7 +63,8 @@ def set_cache(key, value, expiry_seconds=300):
         )
 
     except Exception as error:
-        logger.warning("Redis get failed: %s", error)
+        logger.warning("Redis set failed for key %s: %s", key, error)
+
 
 def delete_cache(key):
     if redis_client is None:
@@ -69,7 +72,6 @@ def delete_cache(key):
 
     try:
         redis_client.delete(key)
-    except Exception:
-        return
 
-
+    except Exception as error:
+        logger.warning("Redis delete failed for key %s: %s", key, error)

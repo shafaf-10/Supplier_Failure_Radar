@@ -6,6 +6,9 @@ from faker import Faker
 from sqlalchemy import text
 
 from app.infra.database import engine
+from app.observability.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 
 fake = Faker()
@@ -278,10 +281,10 @@ def assign_primary_user_to_agent(conn, agent_id, user_id):
 
 
 def generate_users_agents():
-    print("Clearing old users and agents...")
+    logger.info("Clearing old users and agents...")
     clear_users_agents()
 
-    print("Generating 100 agents and 1002 linked users...")
+    logger.info("Generating %s agents and %s linked users...", TOTAL_AGENTS, TOTAL_USERS)
 
     with engine.begin() as conn:
         agent_ids = []
@@ -313,11 +316,11 @@ def generate_users_agents():
                     user_id=user_id,
                 )
 
-    print("Generation completed successfully.")
-    print(f"Agents created: {TOTAL_AGENTS}")
-    print(f"Users created: {TOTAL_USERS}")
-    print("Each user is linked to a valid agent_id.")
-    print("Each agent has a primary user_id.")
+    logger.info("Generation completed successfully.")
+    logger.info("Agents created: %s", TOTAL_AGENTS)
+    logger.info("Users created: %s", TOTAL_USERS)
+    logger.info("Each user is linked to a valid agent_id.")
+    logger.info("Each agent has a primary user_id.")
 
 
 if __name__ == "__main__":

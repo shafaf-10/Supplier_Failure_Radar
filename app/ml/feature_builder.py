@@ -1,4 +1,5 @@
 import pandas as pd
+from app.ml.model_thresholds import RISK_SCORE_THRESHOLDS, RISK_SCORE_WEIGHTS
 from sqlalchemy import text
 from app.infra.database import engine
 from app.ml.feature_engineering.booking_features import build_booking_features
@@ -75,6 +76,7 @@ def get_risk_level(score: float) -> str:
 
 def calculate_risk_score(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
+    w = RISK_SCORE_WEIGHTS
 
     required_cols = [
         "b_failure_rate",
@@ -99,21 +101,21 @@ def calculate_risk_score(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = 0
 
     df["risk_score"] = (
-        df["b_failure_rate"] * 20
-        + df["b_pending_rate"] * 10
-        + df["b_cancellation_rate"] * 10
-        + df["b_deadline_miss_rate"] * 8
-        + df["bp_error_rate"] * 12
-        + df["bp_stuck_rate"] * 8
-        + df["bp_high_retry_rate"] * 8
-        + df["booking_not_issued_rate"] * 6
-        + df["supplier_pnr_missing_rate"] * 5
-        + df["ticket_number_missing_rate"] * 5
-        + df["supplier_ticketing_risk_score_100"] * 0.08
-        + df["rr_refund_risk_score_100"] * 0.08
-        + df["cr_credit_risk_score_100"] * 0.08
-        + df["supplier_session_risk_score_100"] * 0.08
-        + df["wt_wallet_risk_score_100"] * 0.08
+        df["b_failure_rate"] * w["B_FAILURE_RATE"]
+        + df["b_pending_rate"] * w["B_PENDING_RATE"]
+        + df["b_cancellation_rate"] * w["B_CANCELLATION_RATE"]
+        + df["b_deadline_miss_rate"] * w["B_DEADLINE_MISS_RATE"]
+        + df["bp_error_rate"] * w["BP_ERROR_RATE"]
+        + df["bp_stuck_rate"] * w["BP_STUCK_RATE"]
+        + df["bp_high_retry_rate"] * w["BP_HIGH_RETRY_RATE"]
+        + df["booking_not_issued_rate"] * w["BOOKING_NOT_ISSUED_RATE"]
+        + df["supplier_pnr_missing_rate"] * w["SUPPLIER_PNR_MISSING_RATE"]
+        + df["ticket_number_missing_rate"] * w["TICKET_NUMBER_MISSING_RATE"]
+        + df["supplier_ticketing_risk_score_100"] * w["SUPPLIER_TICKETING_RISK_SCORE"]
+        + df["rr_refund_risk_score_100"] * w["REFUND_RISK_SCORE"]
+        + df["cr_credit_risk_score_100"] * w["CREDIT_RISK_SCORE"]
+        + df["supplier_session_risk_score_100"] * w["SESSION_RISK_SCORE"]
+        + df["wt_wallet_risk_score_100"] * w["WALLET_RISK_SCORE"]
     ).round(2)
 
     df["risk_level"] = df["risk_score"].apply(get_risk_level)
@@ -192,7 +194,8 @@ def build_supplier_features(days=None):
             booking_passengers = pd.DataFrame()
     else:
         booking_passengers = read_table("booking_passengers")
-        search_sessions = read_table("search_sessions", days=days)
+
+    search_sessions = read_table("search_sessions", days=days)
     refund_requests = read_table("refund_requests", days=days)
     credit_requests = read_table("credit_requests", days=days)
     wallet_transactions = read_table("wallet_transactions", days=days)

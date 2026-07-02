@@ -23,5 +23,4 @@ python-dotenv
 
 plotly
 
-xgboost
-lightgbm
+prometheus_client>=0.20.0

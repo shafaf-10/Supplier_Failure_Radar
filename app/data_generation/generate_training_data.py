@@ -6,6 +6,9 @@ from faker import Faker
 from sqlalchemy import text
 
 from app.infra.database import SessionLocal
+from app.observability.logger import setup_logger
+
+logger = setup_logger(__name__)
 from app.domain.models import (
     Supplier,
     Airline,
@@ -87,7 +90,7 @@ WALLET_TYPES = ["CREDIT", "DEBIT", "HOLD", "RELEASE", "FAILED_PAYMENT"]
 
 
 def clear_transaction_data(db):
-    print("Clearing old transaction and ML output data...")
+    logger.info("Clearing old transaction and ML output data...")
 
     tables = [
         "supplier_predictions",
@@ -602,13 +605,13 @@ def main():
         clear_transaction_data(db)
 
         print("Production-style B2B training data generation started...")
-        print(f"Total bookings: {TOTAL_BOOKINGS}")
+        logger.info("Total bookings: %s", TOTAL_BOOKINGS)
         print(f"Chunk size: {CHUNK_SIZE}")
         print(f"Valid users linked to agents: {len(users)}")
         print("Supplier risk mapping:")
 
         for supplier in suppliers:
-            print(f"- {supplier.code}: {choose_supplier_group(supplier.code)}")
+            logger.info("- %s: %s", supplier.code, choose_supplier_group(supplier.code))
 
         for start in range(0, TOTAL_BOOKINGS, CHUNK_SIZE):
             end = min(start + CHUNK_SIZE, TOTAL_BOOKINGS)
@@ -631,7 +634,7 @@ def main():
 
     except Exception as error:
         db.rollback()
-        print(f"Error while generating data: {error}")
+        logger.exception("Error while generating data: %s", error)
 
     finally:
         db.close()

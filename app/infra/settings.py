@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "Supplier Failure Radar"
     DEBUG: bool = False
 
+    API_KEY: str = "dev-secret-key"
 
     class Config:
         env_file = ".env"
