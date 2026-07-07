@@ -1,8 +1,8 @@
 import time
-from urllib import response
 import uuid
 
 from fastapi import Request
+
 from app.observability.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -26,11 +26,12 @@ async def request_logger_middleware(
     response.headers["X-Process-Time"] = str(process_time)
 
     logger.info(
-    "request_id=%s method=%s path=%s status_code=%s duration=%ss",
-    request_id,
-    request.method,
-    request.url.path,
-    response.status_code,
-    process_time,
+        "request_id=%s method=%s path=%s status_code=%s duration=%ss",
+        request_id,
+        request.method,
+        request.url.path,
+        response.status_code,
+        process_time,
     )
+
     return response

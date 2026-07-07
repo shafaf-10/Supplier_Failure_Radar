@@ -114,8 +114,7 @@ def clear_transaction_data(db):
 
     db.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
     db.commit()
-
-    print("Old transaction data cleared successfully.")
+    logger.info("Old transaction data cleared successfully.")
 
 
 def choose_supplier_group(supplier_code):

@@ -75,3 +75,23 @@ def delete_cache(key):
 
     except Exception as error:
         logger.warning("Redis delete failed for key %s: %s", key, error)
+
+
+def get_redis_lock(
+    lock_name: str,
+    timeout: int = 300,
+    blocking_timeout: int = 30,
+):
+    if redis_client is None:
+        return None
+
+    try:
+        return redis_client.lock(
+            name=lock_name,
+            timeout=timeout,
+            blocking_timeout=blocking_timeout,
+        )
+
+    except Exception as error:
+        logger.warning("Redis lock creation failed for %s: %s", lock_name, error)
+        return None

@@ -18,7 +18,6 @@ from app.ml.holdout_manager import save_holdout_set
 from app.ml.model_thresholds import (
     ANOMALY_CONFIG,
     CLASSIFIER_CONFIG,
-    FUTURE_FAILURE_THRESHOLDS,
     MODEL_VERSION_CONFIG,
 )
 from app.observability.logger import setup_logger
@@ -91,30 +90,18 @@ def validate_columns(df: pd.DataFrame, columns: list[str]) -> None:
         raise ValueError(f"Missing columns: {missing}")
 
 
-def create_future_failure_target(df: pd.DataFrame) -> pd.Series:
-    t = FUTURE_FAILURE_THRESHOLDS
+def get_observed_future_failure_target(
+    df: pd.DataFrame,
+) -> pd.Series:
+    label_column = "observed_failure_next_7d"
 
-    future_failure = (
-        (df["risk_score"] >= t["HIGH_RISK_SCORE"])
-        | (
-            (df["risk_score"] >= t["MEDIUM_RISK_SCORE"])
-            & (
-                (df["b_failure_rate"] >= t["BOOKING_FAILURE_RATE"])
-                | (df["bp_error_rate"] >= t["PROCESS_ERROR_RATE"])
-                | (df["ss_failure_rate"] >= t["SEARCH_FAILURE_RATE"])
-                | (df["ss_timeout_rate"] >= t["SEARCH_TIMEOUT_RATE"])
-            )
+    if label_column not in df.columns:
+        raise ValueError(
+            "observed_failure_next_7d column missing. "
+            "Future failure model must train on real observed failures."
         )
-        | (
-            (df["risk_score"] >= t["LOW_SIGNAL_RISK_SCORE"])
-            & (
-                (df["wt_wallet_risk_score_100"] >= t["WALLET_RISK_SCORE"])
-                | (df["cr_rejection_rate"] >= t["CREDIT_REJECTION_RATE"])
-            )
-        )
-    )
 
-    return future_failure.astype(int)
+    return df[label_column].fillna(0).astype(int)
 
 
 def evaluate_model(
@@ -277,7 +264,7 @@ def train_models(df: pd.DataFrame | None = None) -> None:
     joblib.dump(risk_bundle, RISK_MODEL_FILE)
     joblib.dump(risk_bundle, versioned_risk_model_file)
 
-    df["future_failure_7d"] = create_future_failure_target(df)
+    df["future_failure_7d"] = get_observed_future_failure_target(df)
     y_future = df["future_failure_7d"].astype(int)
 
     future_model_name, future_model, future_accuracy = train_best_classifier(

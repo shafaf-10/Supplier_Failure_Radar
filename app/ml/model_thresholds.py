@@ -54,3 +54,13 @@ CLASSIFIER_CONFIG = {
     "N_ESTIMATORS": 300,
     "TEST_SIZE": 0.30,
 }
+
+FEATURE_WEIGHTS = {
+    "failure_rate": 0.18,
+    "pending_rate": 0.10,
+    "process_error_rate": 0.16,
+    "refund_rate": 0.10,
+    "credit_rejection_rate": 0.10,
+    "search_failure_rate": 0.20,
+    "wallet_risk_rate": 0.16,
+}
