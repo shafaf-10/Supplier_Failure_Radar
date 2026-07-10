@@ -8,7 +8,6 @@ from sklearn.ensemble import (
     RandomForestClassifier,
 )
 from sklearn.metrics import accuracy_score, classification_report
-from sklearn.model_selection import train_test_split
 
 from app.infra.paths import MODEL_DIR
 from app.ml.anomaly_detector import ANOMALY_FEATURES
@@ -21,6 +20,7 @@ from app.ml.model_thresholds import (
     MODEL_VERSION_CONFIG,
 )
 from app.observability.logger import setup_logger
+
 
 logger = setup_logger(__name__)
 
@@ -67,19 +67,29 @@ FEATURE_COLUMNS = [
     "wt_hold_rate",
     "wt_negative_balance_rate",
     "wt_wallet_risk_score_100",
+
+    # Time-series features
+    "failure_rate_7d",
+    "failure_rate_30d",
+    "failure_rate_change_7d",
+    "failure_rate_change_30d",
+    "booking_volume_7d",
+    "booking_volume_30d",
+    "booking_volume_momentum",
+
+    # Heuristic score is now only a feature, not target
+    "risk_score",
 ]
 
 
-LABEL_MAP = {
-    "LOW_RISK": 0,
-    "MEDIUM_RISK": 1,
-    "HIGH_RISK": 2,
+RISK_LABEL_MAP = {
+    "STABLE_SUPPLIER": 0,
+    "OBSERVED_FAILURE_SUPPLIER": 1,
 }
 
-REVERSE_LABEL_MAP = {
-    0: "LOW_RISK",
-    1: "MEDIUM_RISK",
-    2: "HIGH_RISK",
+RISK_REVERSE_LABEL_MAP = {
+    0: "STABLE_SUPPLIER",
+    1: "OBSERVED_FAILURE_SUPPLIER",
 }
 
 
@@ -90,9 +100,7 @@ def validate_columns(df: pd.DataFrame, columns: list[str]) -> None:
         raise ValueError(f"Missing columns: {missing}")
 
 
-def get_observed_future_failure_target(
-    df: pd.DataFrame,
-) -> pd.Series:
+def get_observed_future_failure_target(df: pd.DataFrame) -> pd.Series:
     label_column = "observed_failure_next_7d"
 
     if label_column not in df.columns:
@@ -109,12 +117,13 @@ def evaluate_model(
     X: pd.DataFrame,
     y: pd.Series,
     class_names: list[str],
+    time_column: pd.Series | None = None,
 ) -> tuple[float, dict]:
     if len(y) < 10 or y.nunique() < 2:
         model.fit(X, y)
         preds = model.predict(X)
 
-        if class_names == ["LOW_RISK", "MEDIUM_RISK", "HIGH_RISK"]:
+        if class_names == ["STABLE_SUPPLIER", "OBSERVED_FAILURE_SUPPLIER"]:
             save_holdout_set(X, y, RISK_HOLDOUT_FILE)
 
         if class_names == ["STABLE_NEXT_7D", "FAILURE_RISK_NEXT_7D"]:
@@ -132,17 +141,50 @@ def evaluate_model(
             ),
         )
 
-    stratify_value = y if y.value_counts().min() >= 2 else None
+    if time_column is None:
+        raise ValueError(
+            "feature_snapshot_date missing. "
+            "Temporal split requires a time column."
+        )
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=CLASSIFIER_CONFIG["TEST_SIZE"],
-        random_state=CLASSIFIER_CONFIG["RANDOM_STATE"],
-        stratify=stratify_value,
+    split_df = X.copy()
+    split_df["target"] = y.values
+    split_df["feature_snapshot_date"] = pd.to_datetime(
+        time_column.values,
+        errors="coerce",
     )
 
-    if class_names == ["LOW_RISK", "MEDIUM_RISK", "HIGH_RISK"]:
+    split_df = split_df.sort_values("feature_snapshot_date").reset_index(drop=True)
+
+    test_size = CLASSIFIER_CONFIG["TEST_SIZE"]
+    test_count = max(1, int(len(split_df) * test_size))
+
+    train_df = split_df.iloc[:-test_count]
+    test_df = split_df.iloc[-test_count:]
+
+    X_train = train_df[X.columns]
+    y_train = train_df["target"].astype(int)
+
+    X_test = test_df[X.columns]
+    y_test = test_df["target"].astype(int)
+
+    if y_train.nunique() < 2:
+        model.fit(X, y)
+        preds = model.predict(X)
+
+        return (
+            accuracy_score(y, preds),
+            classification_report(
+                y,
+                preds,
+                labels=list(range(len(class_names))),
+                target_names=class_names,
+                output_dict=True,
+                zero_division=0,
+            ),
+        )
+
+    if class_names == ["STABLE_SUPPLIER", "OBSERVED_FAILURE_SUPPLIER"]:
         save_holdout_set(X_test, y_test, RISK_HOLDOUT_FILE)
 
     if class_names == ["STABLE_NEXT_7D", "FAILURE_RISK_NEXT_7D"]:
@@ -171,6 +213,7 @@ def train_best_classifier(
     X: pd.DataFrame,
     y: pd.Series,
     class_names: list[str],
+    time_column: pd.Series | None = None,
 ) -> tuple[str, object, float]:
     models = {
         "RandomForest": RandomForestClassifier(
@@ -193,6 +236,7 @@ def train_best_classifier(
             X,
             y,
             class_names,
+            time_column=time_column,
         )
 
         if accuracy > best_accuracy:
@@ -218,6 +262,7 @@ def cleanup_old_model_versions(pattern: str) -> None:
 def train_models(df: pd.DataFrame | None = None) -> None:
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     MODEL_REGISTRY_DIR.mkdir(parents=True, exist_ok=True)
+    HOLDOUT_DIR.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -233,32 +278,34 @@ def train_models(df: pd.DataFrame | None = None) -> None:
 
     validate_columns(df, FEATURE_COLUMNS)
     validate_columns(df, ANOMALY_FEATURES)
+
+    if "feature_snapshot_date" not in df.columns:
+        raise ValueError("feature_snapshot_date column missing.")
+
+    if "observed_failure_next_7d" not in df.columns:
+        raise ValueError("observed_failure_next_7d column missing.")
+
     save_drift_baseline(df, FEATURE_COLUMNS)
 
-    if "risk_level" not in df.columns:
-        raise ValueError("risk_level column missing.")
-
-    df["risk_target"] = df["risk_level"].map(LABEL_MAP)
-
-    if df["risk_target"].isna().any():
-        raise ValueError("risk_level contains unknown values.")
-
     X_risk = df[FEATURE_COLUMNS].fillna(0)
-    y_risk = df["risk_target"].astype(int)
+
+    # Risk model now trains on observed outcomes, not risk_level heuristic.
+    y_risk = df["observed_failure_next_7d"].astype(int)
 
     risk_model_name, risk_model, risk_accuracy = train_best_classifier(
         X_risk,
         y_risk,
-        ["LOW_RISK", "MEDIUM_RISK", "HIGH_RISK"],
+        ["STABLE_SUPPLIER", "OBSERVED_FAILURE_SUPPLIER"],
+        time_column=df["feature_snapshot_date"],
     )
 
     risk_bundle = {
         "model": risk_model,
         "model_name": risk_model_name,
         "feature_columns": FEATURE_COLUMNS,
-        "label_map": LABEL_MAP,
-        "reverse_label_map": REVERSE_LABEL_MAP,
-        "model_purpose": "Current supplier risk classification",
+        "label_map": RISK_LABEL_MAP,
+        "reverse_label_map": RISK_REVERSE_LABEL_MAP,
+        "model_purpose": "Observed supplier failure classification",
     }
 
     joblib.dump(risk_bundle, RISK_MODEL_FILE)
@@ -271,6 +318,7 @@ def train_models(df: pd.DataFrame | None = None) -> None:
         X_risk,
         y_future,
         ["STABLE_NEXT_7D", "FAILURE_RISK_NEXT_7D"],
+        time_column=df["feature_snapshot_date"],
     )
 
     future_bundle = {

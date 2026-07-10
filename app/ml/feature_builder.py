@@ -1,7 +1,8 @@
 import pandas as pd
-from app.ml.model_thresholds import RISK_SCORE_THRESHOLDS, RISK_SCORE_WEIGHTS
 from sqlalchemy import text
+
 from app.infra.database import engine
+from app.ml.model_thresholds import RISK_SCORE_THRESHOLDS, RISK_SCORE_WEIGHTS
 from app.ml.feature_engineering.booking_features import build_booking_features
 from app.ml.feature_engineering.process_features import build_process_features
 from app.ml.feature_engineering.ticketing_features import build_ticketing_features
@@ -10,10 +11,12 @@ from app.ml.feature_engineering.refund_features import build_refund_features
 from app.ml.feature_engineering.credit_features import build_credit_features
 from app.ml.feature_engineering.wallet_features import build_wallet_features
 from app.ml.feature_engineering.build_master import build_master_supplier_table
-from app.observability.logger import setup_logger
-from app.ml.model_thresholds import RISK_SCORE_THRESHOLDS
 from app.ml.schema_validation import validate_table_schema
+from app.observability.logger import setup_logger
+
+
 logger = setup_logger(__name__)
+
 
 ALLOWED_TABLES = {
     "suppliers",
@@ -62,6 +65,8 @@ def read_table(table_name: str, days: int | None = None) -> pd.DataFrame:
 
     query = text(f"SELECT * FROM `{table_name}`")
     return pd.read_sql(query, engine)
+
+
 def get_risk_level(score: float) -> str:
     t = RISK_SCORE_THRESHOLDS
 
@@ -163,6 +168,210 @@ def add_backward_compatible_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df.fillna(0).copy()
 
 
+def add_observed_failure_labels(
+    features: pd.DataFrame,
+    bookings: pd.DataFrame,
+    booking_processes: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Creates observed_failure_next_7d without adding new DB tables.
+
+    Label logic:
+    - 1 = supplier has meaningful observed failures
+    - 0 = supplier does not have meaningful observed failures
+
+    This avoids using risk_score as target.
+    """
+
+    features = features.copy()
+
+    if "supplier_code" not in features.columns:
+        features["observed_failure_next_7d"] = 0
+        return features
+
+    supplier_failure_rates = {}
+
+    if bookings is not None and not bookings.empty:
+        if "provider" in bookings.columns and "status" in bookings.columns:
+            temp = bookings.copy()
+            temp["status_upper"] = temp["status"].astype(str).str.upper()
+
+            temp["is_failed"] = temp["status_upper"].isin(
+                ["FAILED", "EXPIRED", "CANCELLED", "CANCELED"]
+            ).astype(int)
+
+            booking_failure_rate = (
+                temp.groupby("provider")["is_failed"]
+                .mean()
+                .to_dict()
+            )
+
+            supplier_failure_rates.update(booking_failure_rate)
+
+    if booking_processes is not None and not booking_processes.empty:
+        if "provider_code" in booking_processes.columns and "state" in booking_processes.columns:
+            temp = booking_processes.copy()
+            temp["state_upper"] = temp["state"].astype(str).str.upper()
+
+            temp["is_failed"] = temp["state_upper"].isin(
+                ["FAILED", "ERROR", "CANCELLED", "CANCELED"]
+            ).astype(int)
+
+            process_failure_rate = (
+                temp.groupby("provider_code")["is_failed"]
+                .mean()
+                .to_dict()
+            )
+
+            for supplier_code, rate in process_failure_rate.items():
+                existing_rate = supplier_failure_rates.get(supplier_code, 0)
+                supplier_failure_rates[supplier_code] = max(existing_rate, rate)
+
+    features["observed_failure_rate"] = (
+        features["supplier_code"]
+        .map(supplier_failure_rates)
+        .fillna(0)
+    )
+
+    features["observed_failure_next_7d"] = (
+        features["observed_failure_rate"] >= 0.05
+    ).astype(int)
+
+    return features
+def add_feature_snapshot_date(
+    features: pd.DataFrame,
+    bookings: pd.DataFrame,
+) -> pd.DataFrame:
+    features = features.copy()
+
+    if (
+        bookings is None
+        or bookings.empty
+        or "provider" not in bookings.columns
+        or "booking_date" not in bookings.columns
+    ):
+        features["feature_snapshot_date"] = pd.Timestamp.now()
+        return features
+
+    temp = bookings.copy()
+    temp["booking_date"] = pd.to_datetime(temp["booking_date"], errors="coerce")
+
+    supplier_dates = (
+        temp.groupby("provider")["booking_date"]
+        .max()
+        .to_dict()
+    )
+
+    features["feature_snapshot_date"] = (
+        features["supplier_code"]
+        .map(supplier_dates)
+    )
+
+    features["feature_snapshot_date"] = pd.to_datetime(
+        features["feature_snapshot_date"],
+        errors="coerce",
+    ).fillna(pd.Timestamp.now())
+
+    return features
+
+def add_time_series_features(
+    features: pd.DataFrame,
+    bookings: pd.DataFrame,
+) -> pd.DataFrame:
+    features = features.copy()
+
+    default_cols = {
+        "failure_rate_7d": 0,
+        "failure_rate_30d": 0,
+        "failure_rate_change_7d": 0,
+        "failure_rate_change_30d": 0,
+        "booking_volume_7d": 0,
+        "booking_volume_30d": 0,
+        "booking_volume_momentum": 0,
+    }
+
+    if (
+        bookings is None
+        or bookings.empty
+        or "provider" not in bookings.columns
+        or "status" not in bookings.columns
+        or "booking_date" not in bookings.columns
+    ):
+        for col, value in default_cols.items():
+            features[col] = value
+        return features
+
+    temp = bookings.copy()
+    temp["booking_date"] = pd.to_datetime(temp["booking_date"], errors="coerce")
+    temp = temp.dropna(subset=["booking_date"])
+
+    if temp.empty:
+        for col, value in default_cols.items():
+            features[col] = value
+        return features
+
+    max_date = temp["booking_date"].max()
+
+    temp["is_failed"] = (
+        temp["status"]
+        .astype(str)
+        .str.upper()
+        .isin(["FAILED", "EXPIRED", "CANCELLED", "CANCELED"])
+        .astype(int)
+    )
+
+    last_7d = temp[temp["booking_date"] >= max_date - pd.Timedelta(days=7)]
+    prev_7d = temp[
+        (temp["booking_date"] < max_date - pd.Timedelta(days=7))
+        & (temp["booking_date"] >= max_date - pd.Timedelta(days=14))
+    ]
+
+    last_30d = temp[temp["booking_date"] >= max_date - pd.Timedelta(days=30)]
+    prev_30d = temp[
+        (temp["booking_date"] < max_date - pd.Timedelta(days=30))
+        & (temp["booking_date"] >= max_date - pd.Timedelta(days=60))
+    ]
+
+    failure_7d = last_7d.groupby("provider")["is_failed"].mean()
+    failure_prev_7d = prev_7d.groupby("provider")["is_failed"].mean()
+
+    failure_30d = last_30d.groupby("provider")["is_failed"].mean()
+    failure_prev_30d = prev_30d.groupby("provider")["is_failed"].mean()
+
+    volume_7d = last_7d.groupby("provider").size()
+    volume_30d = last_30d.groupby("provider").size()
+
+    features["failure_rate_7d"] = (
+        features["supplier_code"].map(failure_7d).fillna(0)
+    )
+
+    features["failure_rate_30d"] = (
+        features["supplier_code"].map(failure_30d).fillna(0)
+    )
+
+    features["failure_rate_change_7d"] = (
+        features["supplier_code"].map(failure_7d).fillna(0)
+        - features["supplier_code"].map(failure_prev_7d).fillna(0)
+    )
+
+    features["failure_rate_change_30d"] = (
+        features["supplier_code"].map(failure_30d).fillna(0)
+        - features["supplier_code"].map(failure_prev_30d).fillna(0)
+    )
+
+    features["booking_volume_7d"] = (
+        features["supplier_code"].map(volume_7d).fillna(0)
+    )
+
+    features["booking_volume_30d"] = (
+        features["supplier_code"].map(volume_30d).fillna(0)
+    )
+
+    features["booking_volume_momentum"] = (
+        features["booking_volume_7d"] / features["booking_volume_30d"].replace(0, 1)
+    )
+
+    return features.fillna(0)
 
 def build_supplier_features(days=None):
     """
@@ -181,15 +390,19 @@ def build_supplier_features(days=None):
     bookings = read_table("bookings", days=days)
     booking_processes = read_table("booking_processes", days=days)
     booking_flights = read_table("booking_flights", days=days)
+
     if days is not None:
         booking_ids = bookings["id"].tolist()
 
         if booking_ids:
             booking_passengers = pd.read_sql(
-                text("SELECT * FROM booking_passengers WHERE booking_id IN :booking_ids"),
+                text(
+                    "SELECT * FROM booking_passengers "
+                    "WHERE booking_id IN :booking_ids"
+                ),
                 engine,
                 params={"booking_ids": tuple(booking_ids)},
-        )
+            )
         else:
             booking_passengers = pd.DataFrame()
     else:
@@ -264,6 +477,19 @@ def build_supplier_features(days=None):
     features = calculate_risk_score(features)
     features = add_backward_compatible_columns(features)
 
+    features = add_observed_failure_labels(
+        features=features,
+        bookings=bookings,
+        booking_processes=booking_processes,
+    )
+    features = add_feature_snapshot_date(
+    features=features,
+    bookings=bookings,
+)
+    features = add_time_series_features(
+    features=features,
+    bookings=bookings,
+)
 
     logger.info("Supplier features created successfully.")
 
@@ -280,6 +506,12 @@ def build_supplier_features(days=None):
         "wt_wallet_risk_score_100",
         "risk_score",
         "risk_level",
+        "observed_failure_next_7d",
+        "failure_rate_7d",
+        "failure_rate_30d",
+        "failure_rate_change_7d",
+        "failure_rate_change_30d",
+        "booking_volume_momentum",
     ]
 
     existing_display_cols = [
@@ -288,11 +520,8 @@ def build_supplier_features(days=None):
     ]
 
     logger.info(
-    "Supplier feature summary:\n%s",
-    features[existing_display_cols].to_string(index=False),
-)
+        "Supplier feature summary:\n%s",
+        features[existing_display_cols].to_string(index=False),
+    )
 
     return features
-
-
-

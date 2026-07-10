@@ -9,11 +9,14 @@ from app.infra.settings import settings
 from app.middlewares.error_handler import error_handler_middleware
 from app.middlewares.request_logger import request_logger_middleware
 from app.middlewares.rate_limiter import rate_limit_middleware
+from app.ml.retraining_scheduler import start_retraining_scheduler
 from app.observability.logger import setup_logger
 from app.observability.metrics import metrics_response
 from app.services.supplier_prediction_service import SupplierPredictionService
 
+
 logger = setup_logger(__name__)
+
 scheduler = BackgroundScheduler()
 _scheduler_failure_count = 0
 
@@ -57,6 +60,8 @@ async def lifespan(app: FastAPI):
 
     scheduler.start()
     logger.info("Scheduler started. Supplier pipeline runs every 15 minutes.")
+
+    start_retraining_scheduler(interval_minutes=60)
 
     yield
 
