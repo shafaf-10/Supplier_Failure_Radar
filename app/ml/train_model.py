@@ -12,7 +12,7 @@ from sklearn.metrics import accuracy_score, classification_report
 from app.infra.paths import MODEL_DIR
 from app.ml.anomaly_detector import ANOMALY_FEATURES
 from app.ml.drift_detector import save_drift_baseline
-from app.ml.feature_builder import build_supplier_features
+from app.ml.temporal_dataset_builder import build_temporal_training_dataset
 from app.ml.holdout_manager import save_holdout_set
 from app.ml.model_thresholds import (
     ANOMALY_CONFIG,
@@ -271,8 +271,8 @@ def train_models(df: pd.DataFrame | None = None) -> None:
     versioned_anomaly_model_file = MODEL_REGISTRY_DIR / f"anomaly_model_{timestamp}.pkl"
 
     if df is None:
-        logger.info("Building supplier features in memory...")
-        df = build_supplier_features(days=None)
+        logger.info("Building temporal supplier training dataset in memory...")
+        df = build_temporal_training_dataset()
 
     df = df.fillna(0).copy()
 
@@ -305,7 +305,10 @@ def train_models(df: pd.DataFrame | None = None) -> None:
         "feature_columns": FEATURE_COLUMNS,
         "label_map": RISK_LABEL_MAP,
         "reverse_label_map": RISK_REVERSE_LABEL_MAP,
-        "model_purpose": "Observed supplier failure classification",
+        "model_purpose": (
+            "Supplier failure risk prediction using historical features "
+            "and observed outcomes from the following 7 days"
+        ),
     }
 
     joblib.dump(risk_bundle, RISK_MODEL_FILE)

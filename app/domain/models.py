@@ -13,6 +13,91 @@ from sqlalchemy.orm import declarative_base
 
 
 Base = declarative_base()
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    name = Column(String(255))
+    email = Column(String(255), unique=True)
+    phone = Column(String(50))
+    password = Column(String(255))
+
+    two_factor_secret = Column(Text)
+    two_factor_recovery_codes = Column(Text)
+    two_factor_confirmed_at = Column(DateTime)
+
+    google2fa_secret = Column(Text)
+    google2fa_enabled_at = Column(DateTime)
+
+    is_active = Column(Integer, default=1)
+    email_verified_at = Column(DateTime)
+    remember_token = Column(String(255))
+
+    created_at = Column(DateTime)
+    updated_at = Column(DateTime)
+
+
+class Agent(Base):
+    __tablename__ = "agents"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger)
+    parent_id = Column(BigInteger)
+
+    email = Column(String(255))
+    establishment_name = Column(String(255))
+    director_name = Column(String(255))
+    nature_of_business = Column(String(255))
+
+    cr_number = Column(String(100))
+    cr_expiry_date = Column(Date)
+    vat_number = Column(String(100))
+
+    street = Column(String(255))
+    country = Column(String(100))
+    state = Column(String(100))
+    city = Column(String(100))
+    province = Column(String(100))
+
+    office_telephone = Column(String(50))
+    office_email = Column(String(255))
+
+    bank_name = Column(String(255))
+    bank_branch = Column(String(255))
+    account_number = Column(String(100))
+    iban = Column(String(100))
+
+    manager_name = Column(String(255))
+    manager_email = Column(String(255))
+    manager_mobile = Column(String(50))
+
+    finance_name = Column(String(255))
+    finance_email = Column(String(255))
+    finance_mobile = Column(String(50))
+
+    ticketing_contact = Column(String(100))
+    holidays_contact = Column(String(100))
+
+    annual_volume_words = Column(String(255))
+    annual_volume_figures = Column(Numeric(15, 2))
+
+    agent_type = Column(String(100))
+    business_type = Column(String(100))
+    recommended_by = Column(String(255))
+
+    cr_copy_path = Column(String(500))
+    vat_certificate_path = Column(String(500))
+    authorized_id_path = Column(String(500))
+    company_stamp_path = Column(String(500))
+    scanned_signature_path = Column(String(500))
+    signature_data = Column(Text)
+
+    onboarding_submitted_at = Column(DateTime)
+    is_active = Column(Integer, default=1)
+    approval_status = Column(String(50))
+
+    created_at = Column(DateTime)
+    updated_at = Column(DateTime)
 
 
 class Airline(Base):

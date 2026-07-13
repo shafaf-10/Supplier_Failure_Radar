@@ -21,9 +21,6 @@ st.set_page_config(
 
 # -----------------------------------------------------------------------------
 # Backend settings
-# IMPORTANT:
-# Your FastAPI router uses verify_api_key(), so Streamlit MUST send X-API-Key.
-# Default API key is taken from app/infra/settings.py: dev-secret-key
 # -----------------------------------------------------------------------------
 API_BASE_URL = os.getenv("SUPPLIER_API_URL", "http://127.0.0.1:8000").rstrip("/")
 API_KEY = os.getenv("SUPPLIER_API_KEY", "dev-secret-key")
@@ -350,7 +347,7 @@ def warning_badge(status: Any) -> str:
 
 
 def show_api_error(error: Exception) -> None:
-    st.error(f"Cannot load supplier prediction data: {error}")
+    st.error(f"Cannot load supplier data: {error}")
 
     if isinstance(error, requests.exceptions.HTTPError):
         response = error.response
@@ -424,20 +421,20 @@ with st.sidebar:
 
     col_a, col_b = st.columns(2)
     with col_a:
-        soft_refresh = st.button("Reload", use_container_width=True)
+        soft_refresh = st.button("Reload Data", use_container_width=True)
     with col_b:
-        hard_refresh = st.button("Run API", use_container_width=True)
+        hard_refresh = st.button("Refresh Analysis", use_container_width=True)
 
     if soft_refresh:
         st.cache_data.clear()
         st.rerun()
 
     if hard_refresh:
-        with st.spinner("Running supplier pipeline..."):
+        with st.spinner("Refreshing supplier analysis..."):
             try:
                 refresh_backend()
                 st.cache_data.clear()
-                st.success("Pipeline refreshed.")
+                st.success("Supplier analysis refreshed.")
                 st.rerun()
             except Exception as exc:
                 show_api_error(exc)
@@ -449,7 +446,7 @@ with st.sidebar:
 period = REPORTING_PERIODS[reporting_period_label]
 
 try:
-    with st.spinner("Loading supplier predictions..."):
+    with st.spinner("Loading supplier details..."):
         data = fetch_supplier_data(period)
 except Exception as exc:
     show_api_error(exc)
@@ -459,7 +456,7 @@ summary = data.get("summary", {}) or {}
 df = pd.DataFrame(data.get("suppliers", []) or [])
 
 if df.empty:
-    st.warning("No supplier prediction records found.")
+    st.warning("No supplier records found.")
     st.stop()
 
 # -----------------------------------------------------------------------------
@@ -560,7 +557,7 @@ st.markdown(
 <div class="page-header">
     <div>
         <div class="page-title">Supplier Risk Overview</div>
-        <div style="font-size:12px;color:#777;margin-top:4px;">FastAPI + ML supplier failure monitoring</div>
+        <div style="font-size:12px;color:#777;margin-top:4px;">Supplier operational risk and service health overview</div>
     </div>
     <div class="page-meta">
         {datetime.now().strftime("%d %b %Y · %H:%M")}<br>
@@ -594,7 +591,7 @@ st.markdown(
         <div class="stat-value">{to_int(total_suppliers)}</div>
     </div>
     <div class="stat-cell">
-        <div class="stat-label">Critical</div>
+        <div class="stat-label">Immediate Attention</div>
         <div class="stat-value">{to_int(critical_future_warnings)}</div>
     </div>
     <div class="stat-cell">
@@ -630,9 +627,9 @@ else:
         <div class="alert-supplier">{escape(supplier_name(row))}</div>
         <div class="alert-code">{escape(str(row.get("supplier_code")))}</div>
         <div class="alert-row">
-            <span><b>Future Risk</b> {fmt_pct(row.get("_future_prob"))}</span>
+            <span><b>7-Day Failure Risk</b> {fmt_pct(row.get("_future_prob"))}</span>
             <span><b>Level</b> {risk_badge(row.get("risk_level"))}</span>
-            <span><b>Window</b> {escape(str(row.get("future_risk_window") or "N/A"))}</span>
+            <span><b>Risk Window</b> {escape(str(row.get("future_risk_window") or "N/A"))}</span>
             <span><b>Bookings</b> {to_int(row.get("total_bookings"))}</span>
             <span><b>Failure Rate</b> {fmt_pct(row.get("failure_rate"))}</span>
         </div>
@@ -659,7 +656,7 @@ else:
     table_df["Risk Level"] = table_df["risk_level"].replace(
         {"HIGH_RISK": "High", "MEDIUM_RISK": "Medium", "LOW_RISK": "Low"}
     )
-    table_df["Future Risk"] = table_df["_future_prob"].apply(fmt_pct)
+    table_df["7-Day Failure Risk"] = table_df["_future_prob"].apply(fmt_pct)
     table_df["Status"] = table_df["early_warning_status"].replace(
         {
             "CRITICAL_WARNING": "Critical",
@@ -677,13 +674,11 @@ else:
     display_columns = [
         "Supplier",
         "Risk Level",
-        "Risk Score",
-        "Future Risk",
+        "7-Day Failure Risk",
         "Status",
         "Failure Rate",
         "Pending Rate",
         "Bookings",
-        "Anomaly",
     ]
 
     st.dataframe(
@@ -726,11 +721,7 @@ if not filtered.empty:
             <div class="pf-value">{risk_badge(row.get("risk_level"))}</div>
         </div>
         <div class="profile-field">
-            <div class="pf-label">Risk Score</div>
-            <div class="pf-value">{to_num(row.get("risk_score")):.2f}</div>
-        </div>
-        <div class="profile-field">
-            <div class="pf-label">Future Probability</div>
+            <div class="pf-label">7-Day Failure Risk</div>
             <div class="pf-value">{fmt_pct(row.get("_future_prob"))}</div>
         </div>
         <div class="profile-field">
@@ -738,12 +729,8 @@ if not filtered.empty:
             <div class="pf-value">{warning_badge(row.get("early_warning_status"))}</div>
         </div>
         <div class="profile-field">
-            <div class="pf-label">Future Window</div>
+            <div class="pf-label">Risk Window</div>
             <div class="pf-value">{escape(str(row.get("future_risk_window") or "N/A"))}</div>
-        </div>
-        <div class="profile-field">
-            <div class="pf-label">Confidence</div>
-            <div class="pf-value">{escape(str(row.get("prediction_confidence") or "N/A"))}</div>
         </div>
         <div class="profile-field">
             <div class="pf-label">Total Bookings</div>
@@ -771,26 +758,12 @@ if not filtered.empty:
         </div>
     </div>
     <hr class="profile-divider">
-    <div class="profile-action-label">Lead Signal</div>
-    <div class="profile-action-text">{escape(str(row.get("lead_signal") or "N/A"))}</div>
-    <br>
     <div class="profile-action-label">Recommended Action</div>
     <div class="profile-action-text">{clean_text(recommendation_text)}</div>
 </div>
 """,
             unsafe_allow_html=True,
         )
-
-# -----------------------------------------------------------------------------
-# Filtered CSV download
-# -----------------------------------------------------------------------------
-csv_data = filtered.to_csv(index=False).encode("utf-8")
-st.download_button(
-    label="Download filtered CSV",
-    data=csv_data,
-    file_name=f"supplier_predictions_{period}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-    mime="text/csv",
-)
 
 # -----------------------------------------------------------------------------
 # Footer
