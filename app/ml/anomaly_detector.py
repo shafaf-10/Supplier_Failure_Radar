@@ -1,6 +1,13 @@
+import joblib
+import pandas as pd
 from app.infra.paths import MODEL_DIR
 import joblib
 import pandas as pd
+from app.ml.future_risk_predictor import (
+    add_future_risk_predictions,
+    get_early_warning_status,
+    get_future_prediction_confidence,
+)
 
 from app.ml.future_risk_predictor import add_future_risk_predictions
 from app.ml.future_risk_predictor import (
@@ -98,43 +105,227 @@ def build_ml_future_recommendation(row):
         f"({probability_pct}%)."
     )
 
+def get_positive_class_probability(
+    model,
+    input_values: pd.DataFrame,
+) -> list[float]:
+    if hasattr(model, "predict_proba"):
+        probabilities = model.predict_proba(
+            input_values
+        )
 
-def apply_ml_future_failure_prediction(df):
+        model_classes = list(model.classes_)
+
+        if 1 in model_classes:
+            positive_class_index = (
+                model_classes.index(1)
+            )
+
+            return probabilities[
+                :,
+                positive_class_index,
+            ].tolist()
+
+        return [0.0] * len(input_values)
+
+    predictions = model.predict(
+        input_values
+    )
+
+    return [
+        float(prediction)
+        for prediction in predictions
+    ]
+
+def get_highest_risk_horizon(
+    row: pd.Series,
+) -> str:
+    horizon_probabilities = {
+        "NEXT_24_HOURS": float(
+            row.get(
+                "future_probability_24h",
+                0,
+            )
+        ),
+        "NEXT_3_DAYS": float(
+            row.get(
+                "future_probability_3d",
+                0,
+            )
+        ),
+        "NEXT_7_DAYS": float(
+            row.get(
+                "future_probability_7d",
+                0,
+            )
+        ),
+    }
+
+    return max(
+        horizon_probabilities,
+        key=horizon_probabilities.get,
+    )
+
+def apply_ml_future_failure_prediction(
+    df: pd.DataFrame,
+) -> pd.DataFrame:
     df = add_future_risk_predictions(df)
 
     if not FUTURE_MODEL_FILE.exists():
         logger.warning(
-            "Future failure model not found. Using weighted future scoring fallback."
+            "Future model bundle not found. "
+            "Using weighted future scoring fallback."
         )
+
+        fallback_probability = df[
+            "future_instability_probability"
+        ].fillna(0)
+
+        df["future_probability_24h"] = (
+            fallback_probability
+        )
+
+        df["future_probability_3d"] = (
+            fallback_probability
+        )
+
+        df["future_probability_7d"] = (
+            fallback_probability
+        )
+
+        df[
+            "future_unavailability_severity"
+        ] = fallback_probability.apply(
+            lambda probability: (
+                "HIGH"
+                if probability >= 0.75
+                else (
+                    "MEDIUM"
+                    if probability >= 0.45
+                    else "LOW"
+                )
+            )
+        )
+
         return df
 
-    future_bundle = joblib.load(FUTURE_MODEL_FILE)
-    future_model = future_bundle["model"]
-    future_feature_columns = future_bundle["feature_columns"]
+    future_bundle = joblib.load(
+        FUTURE_MODEL_FILE
+    )
 
-    validate_columns(df, future_feature_columns)
+    if not isinstance(future_bundle, dict):
+        raise ValueError(
+            "Invalid future model bundle."
+        )
 
-    future_input = df[future_feature_columns].fillna(0)
+    if "models" not in future_bundle:
+        raise ValueError(
+            "Old future model format detected. "
+            "Run python -m app.ml.train_model again."
+        )
 
-    if hasattr(future_model, "predict_proba"):
-        future_probabilities = future_model.predict_proba(future_input)[:, 1]
+    future_models = future_bundle["models"]
+
+    future_feature_columns = (
+        future_bundle["feature_columns"]
+    )
+
+    validate_columns(
+        df,
+        future_feature_columns,
+    )
+
+    future_input = df[
+        future_feature_columns
+    ].fillna(0)
+
+    horizon_column_map = {
+        "24h": "future_probability_24h",
+        "3d": "future_probability_3d",
+        "7d": "future_probability_7d",
+    }
+
+    for horizon_key, output_column in (
+        horizon_column_map.items()
+    ):
+        if horizon_key not in future_models:
+            raise ValueError(
+                "Future model bundle is missing "
+                f"the {horizon_key} model."
+            )
+
+        horizon_model = future_models[
+            horizon_key
+        ]
+
+        probabilities = (
+            get_positive_class_probability(
+                horizon_model,
+                future_input,
+            )
+        )
+
+        df[output_column] = [
+            round(float(probability), 4)
+            for probability in probabilities
+        ]
+
+    severity_model = future_bundle.get(
+        "severity_model"
+    )
+
+    reverse_severity_map = future_bundle.get(
+        "severity_reverse_label_map",
+        {
+            0: "LOW",
+            1: "MEDIUM",
+            2: "HIGH",
+        },
+    )
+
+    if severity_model is not None:
+        severity_predictions = (
+            severity_model.predict(
+                future_input
+            )
+        )
+
+        df[
+            "future_unavailability_severity"
+        ] = [
+            reverse_severity_map.get(
+                int(prediction),
+                "LOW",
+            )
+            for prediction
+            in severity_predictions
+        ]
     else:
-        future_probabilities = future_model.predict(future_input)
+        df[
+            "future_unavailability_severity"
+        ] = "LOW"
 
-    df["future_instability_probability"] = [
-        round(float(prob), 4)
-        for prob in future_probabilities
-    ]
+    # Keep the old field for backward compatibility.
+    df[
+        "future_instability_probability"
+    ] = df["future_probability_7d"]
 
-    df["future_risk_window"] = "NEXT_7_DAYS"
+    df["future_risk_window"] = df.apply(
+        get_highest_risk_horizon,
+        axis=1,
+    )
 
     df["early_warning_status"] = df[
-        "future_instability_probability"
-    ].apply(get_early_warning_status)
+        "future_probability_7d"
+    ].apply(
+        get_early_warning_status
+    )
 
     df["prediction_confidence"] = df[
-        "future_instability_probability"
-    ].apply(get_future_prediction_confidence)
+        "future_probability_7d"
+    ].apply(
+        get_future_prediction_confidence
+    )
 
     df["future_recommendation"] = df.apply(
         build_ml_future_recommendation,
@@ -158,11 +349,31 @@ def load_anomaly_model():
     if not ANOMALY_MODEL_FILE.exists():
         raise FileNotFoundError(
             f"Anomaly model not found: {ANOMALY_MODEL_FILE}. "
-            "Train the anomaly model first using the offline training script."
+            "Train the model first using the offline "
+            "training script."
         )
 
-    logger.info("Anomaly model loaded from: %s", ANOMALY_MODEL_FILE)
-    return joblib.load(ANOMALY_MODEL_FILE)
+    anomaly_bundle = joblib.load(
+        ANOMALY_MODEL_FILE
+    )
+
+    if not isinstance(anomaly_bundle, dict):
+        raise ValueError(
+            "Old anomaly model format detected. "
+            "Run python -m app.ml.train_model again."
+        )
+
+    if "model" not in anomaly_bundle:
+        raise ValueError(
+            "Invalid anomaly model bundle: model missing."
+        )
+
+    logger.info(
+        "Current-state anomaly model loaded from: %s",
+        ANOMALY_MODEL_FILE,
+    )
+
+    return anomaly_bundle
 
 
 def detect_anomalies(features_df=None):
@@ -171,21 +382,39 @@ def detect_anomalies(features_df=None):
     if df.empty:
         raise Exception("Supplier features are empty. Run feature_builder first.")
 
-    validate_columns(df, ANOMALY_FEATURES)
+    anomaly_bundle = load_anomaly_model()
 
-    x_anomaly = df[ANOMALY_FEATURES].fillna(0)
+    anomaly_model = anomaly_bundle["model"]
 
-    anomaly_model = load_anomaly_model()
+    anomaly_feature_columns = anomaly_bundle[
+        "feature_columns"
+    ]
 
-    df["anomaly_flag"] = anomaly_model.predict(x_anomaly)
-    df["anomaly_score"] = anomaly_model.decision_function(x_anomaly)
+    validate_columns(
+        df,
+        anomaly_feature_columns,
+    )
 
-    df["anomaly_status"] = df["anomaly_flag"].map(
+    x_anomaly = df[
+        anomaly_feature_columns
+    ].fillna(0)
+
+    df["current_anomaly_flag"] = anomaly_model.predict(
+    x_anomaly
+)
+
+    df["current_anomaly_score"] = (
+    anomaly_model.decision_function(x_anomaly)
+)
+
+    df["current_anomaly_status"] = (
+    df["current_anomaly_flag"].map(
         {
-            1: "NORMAL",
-            -1: "ANOMALY",
+            1: "CURRENT_NORMAL",
+            -1: "CURRENT_ANOMALY",
         }
     )
+)
 
     risk_bundle = joblib.load(MODEL_FILE)
     risk_model = risk_bundle["model"]
@@ -213,12 +442,12 @@ def detect_anomalies(features_df=None):
     ]
 
     df["recommendation"] = df.apply(
-        lambda row: get_recommendation(
-            row["risk_level"],
-            row["anomaly_status"],
-        ),
-        axis=1,
-    )
+    lambda row: get_recommendation(
+        row["risk_level"],
+        row["current_anomaly_status"],
+    ),
+    axis=1,
+)
 
     df = apply_ml_future_failure_prediction(df)
 
@@ -229,12 +458,12 @@ def detect_anomalies(features_df=None):
             "risk_level",
             "predicted_risk",
             "prediction_probability",
-            "anomaly_score",
-            "anomaly_status",
+            "current_anomaly_score",
+            "current_anomaly_status",
             "recommendation",
-            "future_instability_probability",
-            "future_risk_window",
-            "early_warning_status",
+            "future_probability_24h",
+            "future_probability_3d",
+            "future_probability_7d",
             "lead_signal",
             "prediction_confidence",
             "future_recommendation",
@@ -252,8 +481,9 @@ def detect_anomalies(features_df=None):
     ].copy()
 
     logger.info(
-        "Production anomaly and future risk prediction completed successfully."
-    )
+    "Current anomaly detection and future unavailability "
+    "prediction completed successfully."
+)
     logger.info(
         "Prediction result generated in memory. CSV writing is disabled in live pipeline."
     )

@@ -1,3 +1,4 @@
+
 import pandas as pd
 
 from app.ml.model_thresholds import FEATURE_WEIGHTS, WARNING_THRESHOLDS
@@ -29,21 +30,25 @@ def get_lead_signal(row: pd.Series) -> str:
     return " / ".join(sorted(top_signals))
 
 
-def calculate_future_instability_probability(row: pd.Series) -> float:
-    weighted_score = 0
+def calculate_future_instability_probability(
+    row: pd.Series,
+) -> float:
+    weighted_score = 0.0
 
     for feature, weight in FEATURE_WEIGHTS.items():
-        weighted_score += row.get(feature, 0) * weight
+        weighted_score += (
+            float(row.get(feature, 0) or 0)
+            * float(weight)
+        )
 
-    risk_score = row.get("risk_score", 0) / 100
+    risk_score = float(
+        row.get("risk_score", 0) or 0
+    ) / 100
 
     weighted_score = (
-    weighted_score * 1.80
-    + risk_score * 0.80
-)
-
-    if str(row.get("anomaly_status", "")).upper() == "ANOMALY":
-     weighted_score += 0.20
+        weighted_score * 1.80
+        + risk_score * 0.80
+    )
 
     probability = clamp(weighted_score)
 
@@ -76,24 +81,60 @@ def get_future_prediction_confidence(probability: float) -> str:
 
     return "LOW"
 
+def get_future_unavailability_severity(
+    probability: float,
+) -> str:
+    if probability >= 0.75:
+        return "HIGH"
+
+    if probability >= 0.45:
+        return "MEDIUM"
+
+    return "LOW"
+
 
 def generate_future_risk_recommendation(row: pd.Series) -> str:
-    probability = row.get("future_instability_probability", 0)
-    lead_signal = row.get("lead_signal", "Operational Risk")
-    status = row.get("early_warning_status", "STABLE")
+    probability = row.get(
+    "future_instability_probability",
+    0,
+)
+
+    lead_signal = row.get(
+    "lead_signal",
+    "Operational Risk",
+)
+
+    status = row.get(
+    "early_warning_status",
+    "STABLE",
+)
+
+    prediction_horizon = row.get(
+    "future_risk_window",
+    "NEXT_7_DAYS",
+)
+
+    readable_horizon = {
+    "NEXT_24_HOURS": "the next 24 hours",
+    "NEXT_3_DAYS": "the next 3 days",
+    "NEXT_7_DAYS": "the next 7 days",
+}.get(
+    prediction_horizon,
+    "the next 7 days",
+)
 
     pct = round(probability * 100, 1)
 
     if status == "CRITICAL_WARNING":
         return (
-            f"High probability of supplier instability in the next 7 days "
+            f"High probability of supplier instability in {readable_horizon} "
             f"({pct}%). Primary lead signal: {lead_signal}. "
             f"Reduce dependency, keep backup supplier ready, and monitor closely."
         )
 
     if status == "WARNING":
         return (
-            f"Supplier shows warning signs for possible instability in the next 7 days "
+            f"High probability of supplier instability in {readable_horizon} "
             f"({pct}%). Primary lead signal: {lead_signal}. "
             f"Monitor operations and prepare fallback routing."
         )
@@ -105,7 +146,7 @@ def generate_future_risk_recommendation(row: pd.Series) -> str:
         )
 
     return (
-        f"Supplier appears stable for the next 7 days. "
+        f"Supplier appears stable for {readable_horizon}. "
         f"Instability probability is {pct}%."
     )
 
@@ -123,8 +164,6 @@ def add_future_risk_predictions(df: pd.DataFrame) -> pd.DataFrame:
     if "risk_score" not in output.columns:
         output["risk_score"] = 0
 
-    if "anomaly_status" not in output.columns:
-        output["anomaly_status"] = "NORMAL"
 
     output["lead_signal"] = output.apply(
         get_lead_signal,
@@ -142,9 +181,11 @@ def add_future_risk_predictions(df: pd.DataFrame) -> pd.DataFrame:
         "future_instability_probability"
     ].apply(get_early_warning_status)
 
-    output["prediction_confidence"] = output[
-        "future_instability_probability"
-    ].apply(get_future_prediction_confidence)
+    output["future_unavailability_severity"] = output[
+    "future_instability_probability"
+].apply(
+    get_future_unavailability_severity
+)
 
     output["future_recommendation"] = output.apply(
         generate_future_risk_recommendation,

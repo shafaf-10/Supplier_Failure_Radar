@@ -2,7 +2,7 @@ def get_recommendation(
     risk_level: str,
     anomaly_status: str,
 ) -> str:
-    if anomaly_status == "ANOMALY":
+    if anomaly_status == "CURRENT_ANOMALY":
         return (
             "Immediate investigation required. Check booking failures, "
             "API retries, ticketing SLA, refund delay, search timeout, "
