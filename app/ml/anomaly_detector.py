@@ -1,20 +1,15 @@
 import joblib
 import pandas as pd
+
 from app.infra.paths import MODEL_DIR
-import joblib
-import pandas as pd
 from app.ml.future_risk_predictor import (
     add_future_risk_predictions,
     get_early_warning_status,
     get_future_prediction_confidence,
 )
-
-from app.ml.future_risk_predictor import add_future_risk_predictions
-from app.ml.future_risk_predictor import (
-    get_early_warning_status,
-    get_future_prediction_confidence,
+from app.ml.prediction_recommendations import (
+    get_recommendation,
 )
-from app.ml.prediction_recommendations import get_recommendation
 from app.observability.logger import setup_logger
 
 
@@ -22,8 +17,13 @@ logger = setup_logger(__name__)
 
 
 MODEL_FILE = MODEL_DIR / "risk_model.pkl"
-FUTURE_MODEL_FILE = MODEL_DIR / "future_failure_model.pkl"
-ANOMALY_MODEL_FILE = MODEL_DIR / "anomaly_model.pkl"
+FUTURE_MODEL_FILE = (
+    MODEL_DIR / "future_failure_model.pkl"
+)
+ANOMALY_MODEL_FILE = (
+    MODEL_DIR / "anomaly_model.pkl"
+)
+
 
 ANOMALY_FEATURES = [
     "b_failure_rate",
@@ -52,69 +52,62 @@ ANOMALY_FEATURES = [
 ]
 
 
-def validate_columns(df, columns):
-    missing = [col for col in columns if col not in df.columns]
+def validate_columns(
+    df: pd.DataFrame,
+    columns: list[str],
+) -> None:
+    missing = [
+        column
+        for column in columns
+        if column not in df.columns
+    ]
 
     if missing:
         raise ValueError(
-            f"Missing columns: {missing}. Run feature_builder.py again."
+            f"Missing columns: {missing}. "
+            "Run feature_builder.py again."
         )
 
 
-def get_risk_prediction_probability(model, x_values):
-    if hasattr(model, "predict_proba"):
-        probabilities = model.predict_proba(x_values)
-        return probabilities.max(axis=1)
-
-    return [0.0] * len(x_values)
-
-
-def build_ml_future_recommendation(row):
-    probability_pct = round(
-        float(row["future_instability_probability"]) * 100,
-        1,
-    )
-
-    lead_signal = row.get("lead_signal", "Operational Risk")
-    warning_status = row.get("early_warning_status", "STABLE")
-
-    if warning_status == "CRITICAL_WARNING":
-        return (
-            f"ML model predicts high probability of supplier instability "
-            f"in the next 7 days ({probability_pct}%). "
-            f"Primary lead signal: {lead_signal}. "
-            f"Prepare backup supplier, reduce dependency, and monitor closely."
+def get_risk_prediction_probability(
+    model,
+    input_values: pd.DataFrame,
+) -> list[float]:
+    if hasattr(
+        model,
+        "predict_proba",
+    ):
+        probabilities = model.predict_proba(
+            input_values
         )
 
-    if warning_status == "WARNING":
-        return (
-            f"ML model shows warning signs for possible instability "
-            f"in the next 7 days ({probability_pct}%). "
-            f"Primary lead signal: {lead_signal}. "
-            f"Monitor closely and prepare fallback routing."
-        )
+        return probabilities.max(
+            axis=1
+        ).tolist()
 
-    if warning_status == "WATCHLIST":
-        return (
-            f"Supplier is on watchlist based on ML future risk score "
-            f"({probability_pct}%). Main signal: {lead_signal}."
+    return [
+        0.0
+        for _ in range(
+            len(input_values)
         )
+    ]
 
-    return (
-        f"ML model predicts low instability probability for the next 7 days "
-        f"({probability_pct}%)."
-    )
 
 def get_positive_class_probability(
     model,
     input_values: pd.DataFrame,
 ) -> list[float]:
-    if hasattr(model, "predict_proba"):
+    if hasattr(
+        model,
+        "predict_proba",
+    ):
         probabilities = model.predict_proba(
             input_values
         )
 
-        model_classes = list(model.classes_)
+        model_classes = list(
+            model.classes_
+        )
 
         if 1 in model_classes:
             positive_class_index = (
@@ -126,7 +119,12 @@ def get_positive_class_probability(
                 positive_class_index,
             ].tolist()
 
-        return [0.0] * len(input_values)
+        return [
+            0.0
+            for _ in range(
+                len(input_values)
+            )
+        ]
 
     predictions = model.predict(
         input_values
@@ -137,6 +135,7 @@ def get_positive_class_probability(
         for prediction in predictions
     ]
 
+
 def get_highest_risk_horizon(
     row: pd.Series,
 ) -> str:
@@ -146,18 +145,21 @@ def get_highest_risk_horizon(
                 "future_probability_24h",
                 0,
             )
+            or 0
         ),
         "NEXT_3_DAYS": float(
             row.get(
                 "future_probability_3d",
                 0,
             )
+            or 0
         ),
         "NEXT_7_DAYS": float(
             row.get(
                 "future_probability_7d",
                 0,
             )
+            or 0
         ),
     }
 
@@ -166,15 +168,109 @@ def get_highest_risk_horizon(
         key=horizon_probabilities.get,
     )
 
+
+def build_ml_future_recommendation(
+    row: pd.Series,
+) -> str:
+    probability = float(
+        row.get(
+            "future_instability_probability",
+            0,
+        )
+        or 0
+    )
+
+    probability_pct = round(
+        probability * 100,
+        1,
+    )
+
+    lead_signal = row.get(
+        "lead_signal",
+        "Operational Risk",
+    )
+
+    warning_status = row.get(
+        "early_warning_status",
+        "STABLE",
+    )
+
+    future_risk_window = row.get(
+        "future_risk_window",
+        "NEXT_7_DAYS",
+    )
+
+    readable_horizon = {
+        "NEXT_24_HOURS": (
+            "the next 24 hours"
+        ),
+        "NEXT_3_DAYS": (
+            "the next 3 days"
+        ),
+        "NEXT_7_DAYS": (
+            "the next 7 days"
+        ),
+    }.get(
+        future_risk_window,
+        "the next 7 days",
+    )
+
+    if warning_status == "CRITICAL_WARNING":
+        return (
+            "ML model predicts a high probability "
+            f"of supplier instability in "
+            f"{readable_horizon} "
+            f"({probability_pct}%). "
+            f"Primary lead signal: {lead_signal}. "
+            "Prepare a backup supplier, reduce "
+            "dependency, and monitor closely."
+        )
+
+    if warning_status == "WARNING":
+        return (
+            "ML model shows warning signs for "
+            f"possible supplier instability in "
+            f"{readable_horizon} "
+            f"({probability_pct}%). "
+            f"Primary lead signal: {lead_signal}. "
+            "Monitor closely and prepare "
+            "fallback routing."
+        )
+
+    if warning_status == "WATCHLIST":
+        return (
+            "The supplier is on the watchlist "
+            "based on the ML future-risk model "
+            f"({probability_pct}%). "
+            f"Main signal: {lead_signal}."
+        )
+
+    return (
+        "ML model predicts a low instability "
+        f"probability for {readable_horizon} "
+        f"({probability_pct}%)."
+    )
+
+
 def apply_ml_future_failure_prediction(
     df: pd.DataFrame,
 ) -> pd.DataFrame:
-    df = add_future_risk_predictions(df)
+    """
+    Apply the trained future model when available.
+
+    When the model is missing, retain the weighted
+    rule fallback, but explicitly mark it as a
+    non-ML heuristic result.
+    """
+
+    df = add_future_risk_predictions(
+        df
+    )
 
     if not FUTURE_MODEL_FILE.exists():
         logger.warning(
             "Future model bundle not found. "
-            "Using weighted future scoring fallback."
+            "Using non-ML weighted-rules fallback."
         )
 
         fallback_probability = df[
@@ -207,13 +303,43 @@ def apply_ml_future_failure_prediction(
             )
         )
 
+        # These values are initially set by
+        # add_future_risk_predictions(), but they
+        # are assigned again here to guarantee that
+        # the fallback can never be presented as ML.
+        df["prediction_source"] = (
+            "HEURISTIC"
+        )
+
+        df["prediction_method"] = (
+            "WEIGHTED_RULES"
+        )
+
+        df["ml_prediction"] = False
+        df["model_available"] = False
+
+        df["prediction_disclaimer"] = (
+            "The future ML model is unavailable. "
+            "This result was generated using "
+            "manually configured weighted rules "
+            "and is not an ML forecast."
+        )
+
+        logger.warning(
+            "Future output source: HEURISTIC. "
+            "ML prediction: False."
+        )
+
         return df
 
     future_bundle = joblib.load(
         FUTURE_MODEL_FILE
     )
 
-    if not isinstance(future_bundle, dict):
+    if not isinstance(
+        future_bundle,
+        dict,
+    ):
         raise ValueError(
             "Invalid future model bundle."
         )
@@ -221,13 +347,18 @@ def apply_ml_future_failure_prediction(
     if "models" not in future_bundle:
         raise ValueError(
             "Old future model format detected. "
-            "Run python -m app.ml.train_model again."
+            "Run python -m app.ml.train_model "
+            "again."
         )
 
-    future_models = future_bundle["models"]
+    future_models = future_bundle[
+        "models"
+    ]
 
     future_feature_columns = (
-        future_bundle["feature_columns"]
+        future_bundle[
+            "feature_columns"
+        ]
     )
 
     validate_columns(
@@ -240,14 +371,21 @@ def apply_ml_future_failure_prediction(
     ].fillna(0)
 
     horizon_column_map = {
-        "24h": "future_probability_24h",
-        "3d": "future_probability_3d",
-        "7d": "future_probability_7d",
+        "24h": (
+            "future_probability_24h"
+        ),
+        "3d": (
+            "future_probability_3d"
+        ),
+        "7d": (
+            "future_probability_7d"
+        ),
     }
 
-    for horizon_key, output_column in (
-        horizon_column_map.items()
-    ):
+    for (
+        horizon_key,
+        output_column,
+    ) in horizon_column_map.items():
         if horizon_key not in future_models:
             raise ValueError(
                 "Future model bundle is missing "
@@ -266,7 +404,10 @@ def apply_ml_future_failure_prediction(
         )
 
         df[output_column] = [
-            round(float(probability), 4)
+            round(
+                float(probability),
+                4,
+            )
             for probability in probabilities
         ]
 
@@ -274,13 +415,15 @@ def apply_ml_future_failure_prediction(
         "severity_model"
     )
 
-    reverse_severity_map = future_bundle.get(
-        "severity_reverse_label_map",
-        {
-            0: "LOW",
-            1: "MEDIUM",
-            2: "HIGH",
-        },
+    reverse_severity_map = (
+        future_bundle.get(
+            "severity_reverse_label_map",
+            {
+                0: "LOW",
+                1: "MEDIUM",
+                2: "HIGH",
+            },
+        )
     )
 
     if severity_model is not None:
@@ -305,14 +448,19 @@ def apply_ml_future_failure_prediction(
             "future_unavailability_severity"
         ] = "LOW"
 
-    # Keep the old field for backward compatibility.
+    # Keep the old seven-day field for backward
+    # compatibility with existing frontend code.
     df[
         "future_instability_probability"
-    ] = df["future_probability_7d"]
+    ] = df[
+        "future_probability_7d"
+    ]
 
-    df["future_risk_window"] = df.apply(
-        get_highest_risk_horizon,
-        axis=1,
+    df["future_risk_window"] = (
+        df.apply(
+            get_highest_risk_horizon,
+            axis=1,
+        )
     )
 
     df["early_warning_status"] = df[
@@ -327,169 +475,355 @@ def apply_ml_future_failure_prediction(
         get_future_prediction_confidence
     )
 
-    df["future_recommendation"] = df.apply(
-        build_ml_future_recommendation,
-        axis=1,
+    df["future_recommendation"] = (
+        df.apply(
+            build_ml_future_recommendation,
+            axis=1,
+        )
+    )
+
+    # Explicit metadata for genuine ML output.
+    df["prediction_source"] = (
+        "ML_MODEL"
+    )
+
+    df["prediction_method"] = (
+        "TRAINED_MULTI_HORIZON_MODEL"
+    )
+
+    df["ml_prediction"] = True
+    df["model_available"] = True
+
+    training_data_provenance = str(
+        future_bundle.get(
+            "training_data_provenance",
+            "UNKNOWN",
+        )
+    ).strip().upper()
+
+    production_validated = bool(
+        future_bundle.get(
+            "production_validated",
+            False,
+        )
+    )
+
+    df[
+        "training_data_provenance"
+    ] = training_data_provenance
+
+    df[
+        "production_validated"
+    ] = production_validated
+
+    if (
+        training_data_provenance == "REAL"
+        and production_validated
+    ):
+        df["prediction_disclaimer"] = (
+            "Prediction generated by a trained "
+            "future ML model validated using real "
+            "supplier traffic."
+        )
+    elif (
+        training_data_provenance
+        == "SYNTHETIC"
+    ):
+        df["prediction_disclaimer"] = (
+            "Prediction generated by a trained "
+            "ML model using synthetic data. "
+            "This model is not yet validated on "
+            "real supplier traffic."
+        )
+    else:
+        df["prediction_disclaimer"] = (
+            "Prediction generated by a trained "
+            "ML model, but its training-data "
+            "provenance is not verified."
+        )
+
+    logger.info(
+        "Future output source: ML_MODEL. "
+        "Training provenance: %s. "
+        "Production validated: %s.",
+        training_data_provenance,
+        production_validated,
     )
 
     return df
 
 
-def load_features(features_df):
+def load_features(
+    features_df: pd.DataFrame,
+) -> pd.DataFrame:
     if features_df is None:
         raise ValueError(
-            "features_df is required. Live pipeline must pass in-memory supplier features."
+            "features_df is required. "
+            "The live pipeline must pass "
+            "in-memory supplier features."
         )
 
-    logger.info("Using in-memory supplier features from pipeline.")
-    return features_df.fillna(0).copy()
+    logger.info(
+        "Using in-memory supplier features "
+        "from pipeline."
+    )
+
+    return (
+        features_df.fillna(0).copy()
+    )
 
 
-def load_anomaly_model():
+def load_anomaly_model() -> dict:
     if not ANOMALY_MODEL_FILE.exists():
         raise FileNotFoundError(
-            f"Anomaly model not found: {ANOMALY_MODEL_FILE}. "
-            "Train the model first using the offline "
-            "training script."
+            "Anomaly model not found: "
+            f"{ANOMALY_MODEL_FILE}. "
+            "Train the model first using the "
+            "offline training script."
         )
 
     anomaly_bundle = joblib.load(
         ANOMALY_MODEL_FILE
     )
 
-    if not isinstance(anomaly_bundle, dict):
+    if not isinstance(
+        anomaly_bundle,
+        dict,
+    ):
         raise ValueError(
             "Old anomaly model format detected. "
-            "Run python -m app.ml.train_model again."
+            "Run python -m app.ml.train_model "
+            "again."
         )
 
     if "model" not in anomaly_bundle:
         raise ValueError(
-            "Invalid anomaly model bundle: model missing."
+            "Invalid anomaly model bundle: "
+            "model missing."
         )
 
     logger.info(
-        "Current-state anomaly model loaded from: %s",
+        "Current-state anomaly model loaded "
+        "from: %s",
         ANOMALY_MODEL_FILE,
     )
 
     return anomaly_bundle
 
 
-def detect_anomalies(features_df=None):
-    df = load_features(features_df)
+def detect_anomalies(
+    features_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    df = load_features(
+        features_df
+    )
 
     if df.empty:
-        raise Exception("Supplier features are empty. Run feature_builder first.")
+        raise ValueError(
+            "Supplier features are empty. "
+            "Run feature_builder first."
+        )
 
-    anomaly_bundle = load_anomaly_model()
+    anomaly_bundle = (
+        load_anomaly_model()
+    )
 
-    anomaly_model = anomaly_bundle["model"]
-
-    anomaly_feature_columns = anomaly_bundle[
-        "feature_columns"
+    anomaly_model = anomaly_bundle[
+        "model"
     ]
+
+    anomaly_feature_columns = (
+        anomaly_bundle[
+            "feature_columns"
+        ]
+    )
 
     validate_columns(
         df,
         anomaly_feature_columns,
     )
 
-    x_anomaly = df[
+    anomaly_input = df[
         anomaly_feature_columns
     ].fillna(0)
 
-    df["current_anomaly_flag"] = anomaly_model.predict(
-    x_anomaly
-)
+    df["current_anomaly_flag"] = (
+        anomaly_model.predict(
+            anomaly_input
+        )
+    )
 
     df["current_anomaly_score"] = (
-    anomaly_model.decision_function(x_anomaly)
-)
+        anomaly_model.decision_function(
+            anomaly_input
+        )
+    )
 
     df["current_anomaly_status"] = (
-    df["current_anomaly_flag"].map(
-        {
-            1: "CURRENT_NORMAL",
-            -1: "CURRENT_ANOMALY",
-        }
+        df["current_anomaly_flag"].map(
+            {
+                1: "CURRENT_NORMAL",
+                -1: "CURRENT_ANOMALY",
+            }
+        )
     )
-)
 
-    risk_bundle = joblib.load(MODEL_FILE)
-    risk_model = risk_bundle["model"]
-    feature_columns = risk_bundle["feature_columns"]
-    reverse_label_map = risk_bundle["reverse_label_map"]
+    if not MODEL_FILE.exists():
+        raise FileNotFoundError(
+            "Current-risk model not found: "
+            f"{MODEL_FILE}. "
+            "Run python -m app.ml.train_model "
+            "first."
+        )
 
-    validate_columns(df, feature_columns)
+    risk_bundle = joblib.load(
+        MODEL_FILE
+    )
 
-    risk_input = df[feature_columns].fillna(0)
+    if not isinstance(
+        risk_bundle,
+        dict,
+    ):
+        raise ValueError(
+            "Invalid current-risk model bundle."
+        )
 
-    risk_predictions = risk_model.predict(risk_input)
-    risk_probabilities = get_risk_prediction_probability(
-        risk_model,
-        risk_input,
+    risk_model = risk_bundle[
+        "model"
+    ]
+
+    feature_columns = risk_bundle[
+        "feature_columns"
+    ]
+
+    reverse_label_map = risk_bundle[
+        "reverse_label_map"
+    ]
+
+    validate_columns(
+        df,
+        feature_columns,
+    )
+
+    risk_input = df[
+        feature_columns
+    ].fillna(0)
+
+    risk_predictions = (
+        risk_model.predict(
+            risk_input
+        )
+    )
+
+    risk_probabilities = (
+        get_risk_prediction_probability(
+            risk_model,
+            risk_input,
+        )
     )
 
     df["predicted_risk"] = [
-        reverse_label_map[int(pred)]
-        for pred in risk_predictions
+        reverse_label_map[
+            int(prediction)
+        ]
+        for prediction in risk_predictions
     ]
 
     df["prediction_probability"] = [
-        round(float(prob), 4)
-        for prob in risk_probabilities
+        round(
+            float(probability),
+            4,
+        )
+        for probability in risk_probabilities
     ]
 
     df["recommendation"] = df.apply(
-    lambda row: get_recommendation(
-        row["risk_level"],
-        row["current_anomaly_status"],
-    ),
-    axis=1,
-)
+        lambda row: get_recommendation(
+            row["risk_level"],
+            row[
+                "current_anomaly_status"
+            ],
+        ),
+        axis=1,
+    )
 
-    df = apply_ml_future_failure_prediction(df)
+    df = (
+        apply_ml_future_failure_prediction(
+            df
+        )
+    )
+
+    result_columns = [
+        "supplier_code",
+        "risk_score",
+        "risk_level",
+        "predicted_risk",
+        "prediction_probability",
+        "current_anomaly_score",
+        "current_anomaly_status",
+        "recommendation",
+        "future_probability_24h",
+        "future_probability_3d",
+        "future_probability_7d",
+        "future_instability_probability",
+        "future_unavailability_severity",
+        "future_risk_window",
+        "early_warning_status",
+        "lead_signal",
+        "prediction_confidence",
+        "future_recommendation",
+
+        # Prediction-source transparency.
+        "prediction_source",
+        "prediction_method",
+        "ml_prediction",
+        "model_available",
+        "prediction_disclaimer",
+
+        "supplier_name",
+        "total_bookings",
+        "failure_rate",
+        "pending_rate",
+        "cancellation_rate",
+        "process_error_rate",
+        "refund_rate",
+        "credit_rejection_rate",
+        "search_failure_rate",
+        "wallet_risk_rate",
+    ]
+
+    optional_metadata_columns = [
+        "training_data_provenance",
+        "production_validated",
+    ]
+
+    for column in optional_metadata_columns:
+        if column in df.columns:
+            result_columns.append(
+                column
+            )
 
     result = df[
-        [
-            "supplier_code",
-            "risk_score",
-            "risk_level",
-            "predicted_risk",
-            "prediction_probability",
-            "current_anomaly_score",
-            "current_anomaly_status",
-            "recommendation",
-            "future_probability_24h",
-            "future_probability_3d",
-            "future_probability_7d",
-            "lead_signal",
-            "prediction_confidence",
-            "future_recommendation",
-            "supplier_name",
-            "total_bookings",
-            "failure_rate",
-            "pending_rate",
-            "cancellation_rate",
-            "process_error_rate",
-            "refund_rate",
-            "credit_rejection_rate",
-            "search_failure_rate",
-            "wallet_risk_rate",
-        ]
+        result_columns
     ].copy()
 
     logger.info(
-    "Current anomaly detection and future unavailability "
-    "prediction completed successfully."
-)
-    logger.info(
-        "Prediction result generated in memory. CSV writing is disabled in live pipeline."
+        "Current anomaly detection and future "
+        "unavailability prediction completed "
+        "successfully."
     )
+
+    logger.info(
+        "Prediction result generated in memory. "
+        "CSV writing is disabled in the live "
+        "pipeline."
+    )
+
     logger.info(
         "Prediction summary:\n%s",
-        result.to_string(index=False),
+        result.to_string(
+            index=False
+        ),
     )
 
     return result

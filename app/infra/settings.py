@@ -17,6 +17,28 @@ class Settings(BaseSettings):
 
     API_KEY: str = "dev-secret-key"
 
+    # Training-data source
+    TRAINING_DATA_PROVENANCE: str = "SYNTHETIC"
+    ALLOW_SYNTHETIC_TRAINING: bool = True
+
+    # Production validation must be explicitly enabled
+    # only after testing on real supplier traffic.
+    ENABLE_PRODUCTION_VALIDATION: bool = False
+
+    # Minimum real temporal training rows required.
+    MIN_PRODUCTION_TRAINING_ROWS: int = 1000
+
+    # Minimum number of distinct temporal snapshots.
+    MIN_PRODUCTION_SNAPSHOTS: int = 60
+
+    # Minimum accepted future-model accuracy.
+    MIN_PRODUCTION_ACCURACY_24H: float = 0.70
+    MIN_PRODUCTION_ACCURACY_3D: float = 0.75
+    MIN_PRODUCTION_ACCURACY_7D: float = 0.80
+
+    # Minimum accepted severity-model accuracy.
+    MIN_PRODUCTION_SEVERITY_ACCURACY: float = 0.60
+
     class Config:
         env_file = ".env"
 

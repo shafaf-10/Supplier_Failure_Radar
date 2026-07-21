@@ -13,6 +13,7 @@ from sklearn.metrics import (
 )
 
 from app.infra.paths import MODEL_DIR
+from app.infra.settings import settings
 from app.ml.anomaly_detector import ANOMALY_FEATURES
 from app.ml.drift_detector import save_drift_baseline
 from app.ml.holdout_manager import save_holdout_set
@@ -35,14 +36,17 @@ FUTURE_MODEL_FILE = MODEL_DIR / "future_failure_model.pkl"
 ANOMALY_MODEL_FILE = MODEL_DIR / "anomaly_model.pkl"
 
 MODEL_REGISTRY_DIR = MODEL_DIR / "registry"
+
 MAX_MODEL_VERSIONS = MODEL_VERSION_CONFIG[
     "MAX_MODEL_VERSIONS"
 ]
 
 HOLDOUT_DIR = MODEL_DIR / "holdout"
+
 RISK_HOLDOUT_FILE = (
     HOLDOUT_DIR / "risk_holdout.pkl"
 )
+
 FUTURE_HOLDOUT_FILE = (
     HOLDOUT_DIR / "future_holdout.pkl"
 )
@@ -153,6 +157,52 @@ RISK_REVERSE_LABEL_MAP = {
 }
 
 
+VALID_TRAINING_DATA_PROVENANCE = {
+    "SYNTHETIC",
+    "REAL",
+}
+
+
+def validate_training_data_provenance() -> str:
+    provenance = (
+        settings.TRAINING_DATA_PROVENANCE
+        .strip()
+        .upper()
+    )
+
+    if provenance not in VALID_TRAINING_DATA_PROVENANCE:
+        raise RuntimeError(
+            "Invalid TRAINING_DATA_PROVENANCE. "
+            "Allowed values are SYNTHETIC or REAL."
+        )
+
+    if (
+        provenance == "SYNTHETIC"
+        and not settings.ALLOW_SYNTHETIC_TRAINING
+    ):
+        raise RuntimeError(
+            "Synthetic model training is disabled. "
+            "Use real supplier traffic or set "
+            "ALLOW_SYNTHETIC_TRAINING=True for "
+            "development testing only."
+        )
+
+    if provenance == "SYNTHETIC":
+        logger.warning(
+            "Training with SYNTHETIC generated data. "
+            "The resulting metrics validate only the "
+            "development pipeline and do not prove "
+            "predictive performance on real supplier "
+            "traffic."
+        )
+    else:
+        logger.info(
+            "Training with REAL supplier traffic."
+        )
+
+    return provenance
+
+
 def validate_columns(
     df: pd.DataFrame,
     columns: list[str],
@@ -173,10 +223,11 @@ def get_current_operational_risk_target(
     df: pd.DataFrame,
 ) -> pd.Series:
     """
-    Build the current-state operational risk target.
+    Build the current-state operational-risk target.
 
     This target uses only information available at the
-    current snapshot. It does not use future labels.
+    current feature snapshot. It does not use future
+    labels and does not forecast future failures.
     """
 
     required_columns = [
@@ -198,7 +249,8 @@ def get_current_operational_risk_target(
         pd.to_numeric(
             df["b_failure_rate"],
             errors="coerce",
-        ).fillna(0)
+        )
+        .fillna(0)
         >= 0.20
     )
 
@@ -207,21 +259,26 @@ def get_current_operational_risk_target(
             pd.to_numeric(
                 df["bp_error_rate"],
                 errors="coerce",
-            ).fillna(0)
+            )
+            .fillna(0)
             >= 0.20
         )
-        | (
+        |
+        (
             pd.to_numeric(
                 df["bp_stuck_rate"],
                 errors="coerce",
-            ).fillna(0)
+            )
+            .fillna(0)
             >= 0.25
         )
-        | (
+        |
+        (
             pd.to_numeric(
                 df["bp_high_retry_rate"],
                 errors="coerce",
-            ).fillna(0)
+            )
+            .fillna(0)
             >= 0.25
         )
     )
@@ -231,21 +288,26 @@ def get_current_operational_risk_target(
             pd.to_numeric(
                 df["ss_failure_rate"],
                 errors="coerce",
-            ).fillna(0)
+            )
+            .fillna(0)
             >= 0.20
         )
-        | (
+        |
+        (
             pd.to_numeric(
                 df["ss_timeout_rate"],
                 errors="coerce",
-            ).fillna(0)
+            )
+            .fillna(0)
             >= 0.10
         )
-        | (
+        |
+        (
             pd.to_numeric(
                 df["ss_completion_gap_rate"],
                 errors="coerce",
-            ).fillna(0)
+            )
+            .fillna(0)
             >= 0.20
         )
     )
@@ -360,8 +422,14 @@ def evaluate_model(
         )
 
     if len(y) < 10:
-        model.fit(X, y)
-        predictions = model.predict(X)
+        model.fit(
+            X,
+            y,
+        )
+
+        predictions = model.predict(
+            X
+        )
 
         if holdout_file is not None:
             save_holdout_set(
@@ -427,7 +495,10 @@ def evaluate_model(
 
     test_count = max(
         1,
-        int(len(split_df) * test_size),
+        int(
+            len(split_df)
+            * test_size
+        ),
     )
 
     if test_count >= len(split_df):
@@ -444,14 +515,18 @@ def evaluate_model(
         -test_count:
     ].copy()
 
-    X_train = train_df[X.columns]
+    X_train = train_df[
+        X.columns
+    ]
 
     y_train = (
         train_df["target"]
         .astype(int)
     )
 
-    X_test = test_df[X.columns]
+    X_test = test_df[
+        X.columns
+    ]
 
     y_test = (
         test_df["target"]
@@ -465,8 +540,14 @@ def evaluate_model(
             "evaluating on the complete dataset."
         )
 
-        model.fit(X, y)
-        predictions = model.predict(X)
+        model.fit(
+            X,
+            y,
+        )
+
+        predictions = model.predict(
+            X
+        )
 
         if holdout_file is not None:
             save_holdout_set(
@@ -524,14 +605,17 @@ def evaluate_model(
         zero_division=0,
     )
 
-    # Retrain the selected candidate on all data
+    # Retrain the chosen model on all available data
     # after temporal evaluation.
     model.fit(
         X,
         y,
     )
 
-    return accuracy, report
+    return (
+        accuracy,
+        report,
+    )
 
 
 def train_best_classifier(
@@ -604,12 +688,162 @@ def train_best_classifier(
         best_accuracy,
     )
 
+def evaluate_production_validation(
+    training_data_provenance: str,
+    dataframe: pd.DataFrame,
+    future_accuracies: dict[str, float],
+    severity_accuracy: float,
+) -> tuple[bool, list[str], dict]:
+    """
+    Decide whether the future model is eligible to be
+    marked as production validated.
+
+    Synthetic data can never pass production validation.
+    Real data must also satisfy explicit volume, temporal,
+    and model-performance requirements.
+    """
+
+    validation_reasons: list[str] = []
+
+    training_row_count = len(dataframe)
+
+    snapshot_count = (
+        dataframe["feature_snapshot_date"]
+        .nunique()
+    )
+
+    validation_metrics = {
+        "training_data_provenance": (
+            training_data_provenance
+        ),
+        "production_validation_enabled": (
+            settings.ENABLE_PRODUCTION_VALIDATION
+        ),
+        "training_row_count": (
+            training_row_count
+        ),
+        "minimum_training_rows": (
+            settings.MIN_PRODUCTION_TRAINING_ROWS
+        ),
+        "snapshot_count": (
+            snapshot_count
+        ),
+        "minimum_snapshots": (
+            settings.MIN_PRODUCTION_SNAPSHOTS
+        ),
+        "future_accuracy_24h": (
+            future_accuracies["24h"]
+        ),
+        "minimum_accuracy_24h": (
+            settings.MIN_PRODUCTION_ACCURACY_24H
+        ),
+        "future_accuracy_3d": (
+            future_accuracies["3d"]
+        ),
+        "minimum_accuracy_3d": (
+            settings.MIN_PRODUCTION_ACCURACY_3D
+        ),
+        "future_accuracy_7d": (
+            future_accuracies["7d"]
+        ),
+        "minimum_accuracy_7d": (
+            settings.MIN_PRODUCTION_ACCURACY_7D
+        ),
+        "severity_accuracy": (
+            severity_accuracy
+        ),
+        "minimum_severity_accuracy": (
+            settings.MIN_PRODUCTION_SEVERITY_ACCURACY
+        ),
+    }
+
+    if training_data_provenance != "REAL":
+        validation_reasons.append(
+            "Training data provenance is not REAL."
+        )
+
+    if not settings.ENABLE_PRODUCTION_VALIDATION:
+        validation_reasons.append(
+            "Production validation is disabled."
+        )
+
+    if (
+        training_row_count
+        < settings.MIN_PRODUCTION_TRAINING_ROWS
+    ):
+        validation_reasons.append(
+            "Training row count is below the "
+            "minimum production requirement."
+        )
+
+    if (
+        snapshot_count
+        < settings.MIN_PRODUCTION_SNAPSHOTS
+    ):
+        validation_reasons.append(
+            "Temporal snapshot count is below the "
+            "minimum production requirement."
+        )
+
+    accuracy_requirements = {
+        "24h": (
+            settings.MIN_PRODUCTION_ACCURACY_24H
+        ),
+        "3d": (
+            settings.MIN_PRODUCTION_ACCURACY_3D
+        ),
+        "7d": (
+            settings.MIN_PRODUCTION_ACCURACY_7D
+        ),
+    }
+
+    for horizon, minimum_accuracy in (
+        accuracy_requirements.items()
+    ):
+        model_accuracy = (
+            future_accuracies[horizon]
+        )
+
+        if model_accuracy < minimum_accuracy:
+            validation_reasons.append(
+                f"Future {horizon} accuracy "
+                f"{model_accuracy:.4f} is below "
+                f"the required "
+                f"{minimum_accuracy:.4f}."
+            )
+
+    if (
+        severity_accuracy
+        < settings.MIN_PRODUCTION_SEVERITY_ACCURACY
+    ):
+        validation_reasons.append(
+            "Future severity accuracy "
+            f"{severity_accuracy:.4f} is below "
+            "the required "
+            f"{settings.MIN_PRODUCTION_SEVERITY_ACCURACY:.4f}."
+        )
+
+    production_validated = (
+        len(validation_reasons) == 0
+    )
+
+    validation_metrics[
+        "production_validated"
+    ] = production_validated
+
+    return (
+        production_validated,
+        validation_reasons,
+        validation_metrics,
+    )
 
 def cleanup_old_model_versions(
     pattern: str,
 ) -> None:
     model_files = sorted(
-        MODEL_REGISTRY_DIR.glob(pattern),
+        MODEL_REGISTRY_DIR.glob(
+            pattern
+        ),
         key=lambda file: (
             file.stat().st_mtime
         ),
@@ -630,6 +864,10 @@ def cleanup_old_model_versions(
 def train_models(
     df: pd.DataFrame | None = None,
 ) -> None:
+    training_data_provenance = (
+        validate_training_data_provenance()
+    )
+
     MODEL_DIR.mkdir(
         parents=True,
         exist_ok=True,
@@ -693,8 +931,7 @@ def train_models(
 
     required_future_columns = [
         config["column"]
-        for config
-        in FUTURE_TARGETS.values()
+        for config in FUTURE_TARGETS.values()
     ]
 
     required_future_columns.append(
@@ -730,7 +967,9 @@ def train_models(
     )
 
     df = df.dropna(
-        subset=["feature_snapshot_date"]
+        subset=[
+            "feature_snapshot_date"
+        ]
     ).copy()
 
     if df.empty:
@@ -749,7 +988,7 @@ def train_models(
     ]
 
     # -------------------------------------------------
-    # Current operational risk model
+    # Current operational-risk classifier
     # -------------------------------------------------
 
     X_risk = df[
@@ -784,26 +1023,72 @@ def train_models(
 
     risk_bundle = {
         "model": risk_model,
+
+        "training_data_provenance": (
+            training_data_provenance
+        ),
+
+        "production_validated": (
+            training_data_provenance
+            == "REAL"
+        ),
+
+        # Explicitly identify that this is a
+        # current-state classifier, not a
+        # future-failure prediction model.
+        "model_type": (
+            "CURRENT_STATE_CLASSIFIER"
+        ),
+
+        "predicts_future": False,
+
+        "prediction_scope": (
+            "CURRENT_OPERATIONAL_STATE"
+        ),
+
+        "target_description": (
+            "Classifies the supplier's current "
+            "operational risk using information "
+            "available at the same feature snapshot. "
+            "It does not forecast future supplier "
+            "failures."
+        ),
+
         "model_name": risk_model_name,
-        "feature_columns": FEATURE_COLUMNS,
-        "label_map": RISK_LABEL_MAP,
+
+        "feature_columns": (
+            FEATURE_COLUMNS
+        ),
+
+        "label_map": (
+            RISK_LABEL_MAP
+        ),
+
         "reverse_label_map": (
             RISK_REVERSE_LABEL_MAP
         ),
+
         "target": (
             "current_operational_risk"
         ),
+
         "prediction_horizon": (
             "CURRENT_STATE"
         ),
-        "accuracy": risk_accuracy,
+
+        "accuracy": (
+            risk_accuracy
+        ),
+
         "model_purpose": (
             "Classify the supplier's current "
             "operational risk using booking, "
             "process, search, ticketing, refund, "
             "credit, wallet and time-series "
             "conditions available at the current "
-            "feature snapshot."
+            "feature snapshot. This model does "
+            "not predict future service "
+            "unavailability."
         ),
     }
 
@@ -818,7 +1103,7 @@ def train_models(
     )
 
     # -------------------------------------------------
-    # Multi-horizon future models
+    # Multi-horizon future prediction models
     # -------------------------------------------------
 
     X_future = df[
@@ -835,11 +1120,15 @@ def train_models(
         horizon_config,
     ) in FUTURE_TARGETS.items():
         target_column = (
-            horizon_config["column"]
+            horizon_config[
+                "column"
+            ]
         )
 
         class_names = (
-            horizon_config["class_names"]
+            horizon_config[
+                "class_names"
+            ]
         )
 
         y_future = get_future_target(
@@ -903,7 +1192,9 @@ def train_models(
         y_severity,
         severity_label_map,
         severity_reverse_label_map,
-    ) = get_future_severity_target(df)
+    ) = get_future_severity_target(
+        df
+    )
 
     severity_distribution = (
         df[SEVERITY_TARGET_COLUMN]
@@ -932,15 +1223,97 @@ def train_models(
         holdout_file=None,
     )
 
+    (
+        production_validated,
+        production_validation_reasons,
+        production_validation_metrics,
+    ) = evaluate_production_validation(
+        training_data_provenance=(
+            training_data_provenance
+    ),
+    dataframe=df,
+    future_accuracies=(
+        future_accuracies
+    ),
+    severity_accuracy=(
+        severity_accuracy
+    ),
+)
+
+    if production_validated:
+        logger.info(
+        "Future model passed production "
+        "validation requirements."
+    )
+    else:
+        logger.warning(
+        "Future model is not production "
+        "validated. Reasons: %s",
+        production_validation_reasons,
+    )
+    
+
     future_bundle = {
-        "models": future_models,
-        "model_names": future_model_names,
-        "feature_columns": FEATURE_COLUMNS,
+        "models": (
+            future_models
+        ),
+
+        "training_data_provenance": (
+            training_data_provenance
+        ),
+
+        "production_validated": (
+    production_validated
+),
+
+"production_validation_reasons": (
+    production_validation_reasons
+),
+
+"production_validation_metrics": (
+    production_validation_metrics
+),
+
+        "model_type": (
+            "FUTURE_OPERATIONAL_UNAVAILABILITY_CLASSIFIER"
+        ),
+
+        "predicts_future": True,
+
+        "prediction_scope": (
+            "FUTURE_OPERATIONAL_SERVICE_UNAVAILABILITY"
+        ),
+
+        "target_description": (
+            "Predicts future operational service "
+            "unavailability using observed operational "
+            "signals such as search timeouts, search "
+            "failures, incomplete responses, process "
+            "errors, stuck processes and retry patterns. "
+            "This model does not use confirmed supplier "
+            "outage logs."
+        ),
+
+        "label_source": (
+            "OBSERVED_OPERATIONAL_SIGNALS"
+        ),
+
+        "uses_confirmed_outage_logs": False,
+
+        "model_names": (
+            future_model_names
+        ),
+
+        "feature_columns": (
+            FEATURE_COLUMNS
+        ),
+
         "targets": {
             horizon_key: config["column"]
             for horizon_key, config
             in FUTURE_TARGETS.items()
         },
+
         "horizon_display_names": {
             horizon_key: (
                 config["display_name"]
@@ -948,6 +1321,7 @@ def train_models(
             for horizon_key, config
             in FUTURE_TARGETS.items()
         },
+
         "class_names": {
             horizon_key: (
                 config["class_names"]
@@ -955,38 +1329,52 @@ def train_models(
             for horizon_key, config
             in FUTURE_TARGETS.items()
         },
+
         "target_distributions": (
             future_target_distributions
         ),
-        "accuracies": future_accuracies,
-        "severity_model": severity_model,
+
+        "accuracies": (
+            future_accuracies
+        ),
+
+        "severity_model": (
+            severity_model
+        ),
+
         "severity_model_name": (
             severity_model_name
         ),
+
         "severity_target": (
             SEVERITY_TARGET_COLUMN
         ),
+
         "severity_label_map": (
             severity_label_map
         ),
+
         "severity_reverse_label_map": (
             severity_reverse_label_map
         ),
+
         "severity_accuracy": (
             severity_accuracy
         ),
+
         "prediction_horizons": [
             "NEXT_24_HOURS",
             "NEXT_3_DAYS",
             "NEXT_7_DAYS",
         ],
+
         "model_purpose": (
-            "Predict supplier service "
-            "unavailability independently for "
-            "the next 24 hours, next 3 days and "
-            "next 7 days, and classify expected "
-            "7-day service-unavailability "
-            "severity as LOW, MEDIUM or HIGH."
+            "Predict future supplier operational service "
+            "unavailability for the next 24 hours, 3 days "
+            "and 7 days using observed operational "
+            "behaviour. Predictions are based on future "
+            "operational signals rather than confirmed "
+            "supplier outage records."
         ),
     }
 
@@ -1031,14 +1419,43 @@ def train_models(
     )
 
     anomaly_bundle = {
-        "model": anomaly_model,
+        "model": (
+            anomaly_model
+        ),
+
+        "training_data_provenance": (
+            training_data_provenance
+        ),
+
+        "production_validated": (
+            training_data_provenance
+            == "REAL"
+        ),
+
+        "production_validation_reasons": (
+            production_validation_reasons
+        ),
+
+        "production_validation_metrics": (
+            production_validation_metrics
+        ),
+
+        "model_type": (
+            "CURRENT_STATE_ANOMALY_DETECTOR"
+        ),
+
+        "predicts_future": False,
+
         "feature_columns": (
             ANOMALY_FEATURES
         ),
+
         "detection_scope": (
             "CURRENT_STATE"
         ),
+
         "prediction_horizon": None,
+
         "model_purpose": (
             "Detect unusual supplier behaviour "
             "in the current feature snapshot. "
@@ -1074,10 +1491,17 @@ def train_models(
         "anomaly_model_*.pkl"
     )
 
-    logger.info(
-        "Production ML training completed "
-        "successfully."
-    )
+    if training_data_provenance == "REAL":
+        logger.info(
+            "Real-data ML training completed "
+            "successfully."
+        )
+    else:
+        logger.warning(
+            "Synthetic development training "
+            "completed. Models are not validated "
+            "for production supplier traffic."
+        )
 
     logger.info(
         "Risk model saved to: %s",
@@ -1129,4 +1553,3 @@ def train_models(
 
 if __name__ == "__main__":
     train_models()
-

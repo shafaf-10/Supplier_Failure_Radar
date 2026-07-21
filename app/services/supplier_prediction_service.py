@@ -1,8 +1,10 @@
 import time
 from datetime import datetime
 
+import joblib
 import pandas as pd
 
+from app.infra.paths import MODEL_DIR
 from app.infra.redis_provider import get_redis_lock
 from app.ml.pipeline import run_prediction_pipeline
 from app.observability.logger import setup_logger
@@ -18,6 +20,10 @@ from app.services.webhook_service import send_webhook
 
 logger = setup_logger(__name__)
 
+FUTURE_MODEL_FILE = (
+    MODEL_DIR / "future_failure_model.pkl"
+)
+
 
 class SupplierPredictionService:
     CACHE_PREFIX = "supplier_predictions"
@@ -29,6 +35,119 @@ class SupplierPredictionService:
         "1y": 365,
         "all": None,
     }
+
+    @classmethod
+    def _get_model_validation_info(
+        cls,
+    ) -> dict:
+        default_info = {
+            "training_data_provenance": (
+                "UNKNOWN"
+            ),
+            "production_validated": False,
+            "prediction_status": (
+                "MODEL_NOT_VALIDATED"
+            ),
+            "prediction_notice": (
+                "Model validation information "
+                "is unavailable."
+            ),
+        }
+
+        if not FUTURE_MODEL_FILE.exists():
+            return {
+                **default_info,
+                "prediction_status": (
+                    "HEURISTIC_FALLBACK"
+                ),
+                "prediction_notice": (
+                    "The trained future model is "
+                    "missing. Future probabilities "
+                    "may use a weighted heuristic "
+                    "fallback and are not ML "
+                    "forecasts."
+                ),
+            }
+
+        try:
+            future_bundle = joblib.load(
+                FUTURE_MODEL_FILE
+            )
+
+            if not isinstance(
+                future_bundle,
+                dict,
+            ):
+                return default_info
+
+            provenance = str(
+                future_bundle.get(
+                    "training_data_provenance",
+                    "UNKNOWN",
+                )
+            ).strip().upper()
+
+            production_validated = bool(
+                future_bundle.get(
+                    "production_validated",
+                    False,
+                )
+            )
+
+            if (
+                provenance == "REAL"
+                and production_validated
+            ):
+                return {
+                    "training_data_provenance": (
+                        provenance
+                    ),
+                    "production_validated": True,
+                    "prediction_status": (
+                        "PRODUCTION_VALIDATED"
+                    ),
+                    "prediction_notice": (
+                        "Future prediction model "
+                        "was trained and validated "
+                        "using real supplier traffic."
+                    ),
+                }
+
+            if provenance == "SYNTHETIC":
+                return {
+                    "training_data_provenance": (
+                        provenance
+                    ),
+                    "production_validated": False,
+                    "prediction_status": (
+                        "DEVELOPMENT_ONLY"
+                    ),
+                    "prediction_notice": (
+                        "Future probabilities come "
+                        "from a model trained on "
+                        "synthetic generated data. "
+                        "They are for development "
+                        "validation and are not "
+                        "proven on real supplier "
+                        "traffic."
+                    ),
+                }
+
+            return {
+                **default_info,
+                "training_data_provenance": (
+                    provenance
+                ),
+            }
+
+        except Exception as error:
+            logger.exception(
+                "Could not read future model "
+                "validation metadata: %s",
+                error,
+            )
+
+            return default_info
 
     @classmethod
     def _to_float(
@@ -167,7 +286,7 @@ class SupplierPredictionService:
             ),
 
             # Backward-compatible field.
-            # It represents the 7-day probability.
+            # It represents the seven-day probability.
             "future_instability_probability": (
                 future_probability_7d
             ),
@@ -385,16 +504,12 @@ class SupplierPredictionService:
             "average_risk_score": (
                 average_risk_score
             ),
-
-            # Backward-compatible average.
             "average_future_instability_probability": (
                 cls._average_probability(
                     suppliers,
                     "future_probability_7d",
                 )
             ),
-
-            # New horizon averages.
             "average_future_probability_24h": (
                 cls._average_probability(
                     suppliers,
@@ -541,6 +656,10 @@ class SupplierPredictionService:
 
             raise
 
+        model_validation = (
+            cls._get_model_validation_info()
+        )
+
         if (
             prediction_df is None
             or prediction_df.empty
@@ -548,6 +667,9 @@ class SupplierPredictionService:
             response = {
                 "period": period,
                 "latest_date": None,
+                "model_validation": (
+                    model_validation
+                ),
                 "summary": cls._build_summary(
                     []
                 ),
@@ -640,6 +762,9 @@ class SupplierPredictionService:
         response = {
             "period": period,
             "latest_date": latest_date,
+            "model_validation": (
+                model_validation
+            ),
             "summary": cls._build_summary(
                 suppliers
             ),
