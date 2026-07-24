@@ -654,7 +654,7 @@ from app.infra.database import SessionLocal
 from app.observability.logger import setup_logger
 
 logger = setup_logger(__name__)
-from app.domain.models import (
+from app.data_generation.models import (
     Supplier,
     Airline,
     Airport,

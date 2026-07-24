@@ -9,9 +9,9 @@ router = APIRouter()
 
 VALID_PERIODS = ["24h", "7d", "30d", "1y", "all"]
 
-
+# FastAPI registers this function through the route decorator.
 @router.get("/supplier-predictions")
-async def get_supplier_predictions(
+async def get_supplier_predictions(  # noqa
     request: Request,
     period: str = Query("all"),
     limit: int = Query(100, ge=1),
@@ -44,9 +44,9 @@ async def get_supplier_predictions(
         "offset": offset,
     }
 
-
+# FastAPI registers this function through the route decorator.
 @router.post("/refresh-model")
-async def refresh_model():
+async def refresh_model():  # noqa
     try:
         SupplierPredictionService.clear_cache()
 

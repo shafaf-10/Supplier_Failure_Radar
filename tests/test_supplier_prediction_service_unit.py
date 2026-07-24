@@ -7,7 +7,7 @@ class DummyLock:
     def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, _exc_type, _exc_value, _traceback):
         return False
 
 
@@ -18,7 +18,7 @@ def test_clean_supplier_record_handles_missing_and_nan_values():
         "total_bookings": None,
         "risk_score": float("nan"),
         "prediction_probability": None,
-        "anomaly_score": None,
+        "current_anomaly_score": None,
         "future_instability_probability": None,
     }
 
@@ -29,34 +29,34 @@ def test_clean_supplier_record_handles_missing_and_nan_values():
     assert result["total_bookings"] == 0
     assert result["risk_score"] == 0.0
     assert result["prediction_probability"] == 0.0
-    assert result["anomaly_score"] == 0.0
+    assert result["current_anomaly_score"] == 0.0
     assert result["future_instability_probability"] == 0.0
 
 
 def test_build_summary_counts_supplier_statuses_correctly():
     suppliers = [
-        {
-            "risk_level": "HIGH_RISK",
-            "anomaly_status": "ANOMALY",
-            "early_warning_status": "CRITICAL_WARNING",
-            "risk_score": 80,
-            "future_instability_probability": 0.9,
-        },
-        {
-            "risk_level": "MEDIUM_RISK",
-            "anomaly_status": "NORMAL",
-            "early_warning_status": "WARNING",
-            "risk_score": 50,
-            "future_instability_probability": 0.5,
-        },
-        {
-            "risk_level": "LOW_RISK",
-            "anomaly_status": "NORMAL",
-            "early_warning_status": "STABLE",
-            "risk_score": 20,
-            "future_instability_probability": 0.1,
-        },
-    ]
+    {
+        "risk_level": "HIGH_RISK",
+        "current_anomaly_status": "CURRENT_ANOMALY",
+        "early_warning_status": "CRITICAL_WARNING",
+        "risk_score": 80,
+        "future_probability_7d": 0.9,
+    },
+    {
+        "risk_level": "MEDIUM_RISK",
+        "current_anomaly_status": "CURRENT_NORMAL",
+        "early_warning_status": "WARNING",
+        "risk_score": 50,
+        "future_probability_7d": 0.5,
+    },
+    {
+        "risk_level": "LOW_RISK",
+        "current_anomaly_status": "CURRENT_NORMAL",
+        "early_warning_status": "STABLE",
+        "risk_score": 20,
+        "future_probability_7d": 0.1,
+    },
+]
 
     result = SupplierPredictionService._build_summary(suppliers)
 
@@ -64,7 +64,7 @@ def test_build_summary_counts_supplier_statuses_correctly():
     assert result["high_risk_suppliers"] == 1
     assert result["medium_risk_suppliers"] == 1
     assert result["low_risk_suppliers"] == 1
-    assert result["anomaly_suppliers"] == 1
+    assert result["current_anomaly_suppliers"] == 1
     assert result["critical_future_warnings"] == 1
     assert result["warning_suppliers"] == 2
     assert result["average_risk_score"] == 50.0
@@ -122,9 +122,8 @@ def test_get_predictions_runs_pipeline_without_live_db(monkeypatch):
 
     monkeypatch.setattr(
         "app.services.supplier_prediction_service.send_webhook",
-        lambda payload: None,
+        lambda _payload: None,
     )
-
     prediction_df = pd.DataFrame(
         [
             {

@@ -76,16 +76,18 @@ app = FastAPI(
 )
 
 
+# FastAPI registers this function through the route decorator.
 @app.get("/health")
-def health_check():
+def health_check():  # noqa
     return {
         "status": "ok",
         "service": "supplier-failure-radar",
     }
 
 
+# FastAPI registers this function through the route decorator.
 @app.get("/metrics")
-def metrics():
+def metrics():  # noqa
     return metrics_response()
 
 
@@ -109,8 +111,9 @@ app.add_middleware(
 app.include_router(api_router)
 
 
+# FastAPI registers this function through the route decorator.
 @app.get("/")
-def root():
+def root():  # noqa
     return {
         "message": "Supplier Failure Radar API is running",
     }
