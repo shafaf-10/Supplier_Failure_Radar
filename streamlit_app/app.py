@@ -23,7 +23,13 @@ st.set_page_config(
 # Backend settings
 # -----------------------------------------------------------------------------
 API_BASE_URL = os.getenv("SUPPLIER_API_URL", "http://127.0.0.1:8000").rstrip("/")
-API_KEY = os.getenv("SUPPLIER_API_KEY", "dev-secret-key")
+API_KEY = os.getenv("SUPPLIER_API_KEY")
+
+if not API_KEY:
+    raise RuntimeError(
+        "SUPPLIER_API_KEY is not configured. "
+        "Set it in the environment before starting Streamlit."
+    )
 REQUEST_TIMEOUT = 120
 
 REPORTING_PERIODS = {
