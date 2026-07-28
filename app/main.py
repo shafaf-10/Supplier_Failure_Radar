@@ -7,13 +7,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.router import api_router
 from app.infra.settings import settings
 from app.middlewares.error_handler import error_handler_middleware
-from app.middlewares.request_logger import request_logger_middleware
 from app.middlewares.rate_limiter import rate_limit_middleware
+from app.middlewares.request_logger import request_logger_middleware
 from app.ml.retraining_scheduler import start_retraining_scheduler
 from app.observability.logger import setup_logger
 from app.observability.metrics import metrics_response
 from app.services.supplier_prediction_service import SupplierPredictionService
-
 
 logger = setup_logger(__name__)
 

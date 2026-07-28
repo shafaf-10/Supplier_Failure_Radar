@@ -4,7 +4,6 @@ from fastapi.concurrency import run_in_threadpool
 from app.observability.audit_logger import log_prediction_view
 from app.services.supplier_prediction_service import SupplierPredictionService
 
-
 router = APIRouter()
 
 VALID_PERIODS = ["24h", "7d", "30d", "1y", "all"]

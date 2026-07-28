@@ -27,7 +27,6 @@ from app.ml.temporal_dataset_builder import (
 )
 from app.observability.logger import setup_logger
 
-
 logger = setup_logger(__name__)
 
 

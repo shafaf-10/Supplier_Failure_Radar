@@ -17,7 +17,6 @@ from app.observability.metrics import (
 from app.services.cache_adapter import CacheAdapter
 from app.services.webhook_service import send_webhook
 
-
 logger = setup_logger(__name__)
 
 FUTURE_MODEL_FILE = (

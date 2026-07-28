@@ -2,18 +2,17 @@ import pandas as pd
 from sqlalchemy import text
 
 from app.infra.database import engine
-from app.ml.model_thresholds import RISK_SCORE_THRESHOLDS, RISK_SCORE_WEIGHTS
 from app.ml.feature_engineering.booking_features import build_booking_features
-from app.ml.feature_engineering.process_features import build_process_features
-from app.ml.feature_engineering.ticketing_features import build_ticketing_features
-from app.ml.feature_engineering.session_features import build_session_features
-from app.ml.feature_engineering.refund_features import build_refund_features
-from app.ml.feature_engineering.credit_features import build_credit_features
-from app.ml.feature_engineering.wallet_features import build_wallet_features
 from app.ml.feature_engineering.build_master import build_master_supplier_table
+from app.ml.feature_engineering.credit_features import build_credit_features
+from app.ml.feature_engineering.process_features import build_process_features
+from app.ml.feature_engineering.refund_features import build_refund_features
+from app.ml.feature_engineering.session_features import build_session_features
+from app.ml.feature_engineering.ticketing_features import build_ticketing_features
+from app.ml.feature_engineering.wallet_features import build_wallet_features
+from app.ml.model_thresholds import RISK_SCORE_THRESHOLDS, RISK_SCORE_WEIGHTS
 from app.ml.schema_validation import validate_table_schema
 from app.observability.logger import setup_logger
-
 
 logger = setup_logger(__name__)
 
@@ -59,11 +58,11 @@ def read_table(table_name: str, days: int | None = None) -> pd.DataFrame:
                 (SELECT MAX(`{date_column}`) FROM `{table_name}`),
                 INTERVAL :days DAY
             )
-            """
+            """  # nosec B608 - table_name validated against ALLOWED_TABLES above, not user input
         )
         return pd.read_sql(query, engine, params={"days": days})
 
-    query = text(f"SELECT * FROM `{table_name}`")
+    query = text(f"SELECT * FROM `{table_name}`")  # nosec B608 - table_name validated against ALLOWED_TABLES above, not user input
     return pd.read_sql(query, engine)
 
 

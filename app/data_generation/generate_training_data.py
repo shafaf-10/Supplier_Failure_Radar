@@ -655,17 +655,17 @@ from app.observability.logger import setup_logger
 
 logger = setup_logger(__name__)
 from app.data_generation.models import (
-    Supplier,
     Airline,
     Airport,
-    BookingProcess,
     Booking,
     BookingFlight,
-    BookingSegment,
     BookingPassenger,
-    RefundRequest,
+    BookingProcess,
+    BookingSegment,
     CreditRequest,
+    RefundRequest,
     SearchSession,
+    Supplier,
     WalletTransaction,
 )
 
@@ -770,7 +770,7 @@ def clear_transaction_data(db):
                 )
                 continue
 
-            db.execute(text(f"DELETE FROM `{table}`"))
+            db.execute(text(f"DELETE FROM `{table}`"))  # nosec B608 - table comes from fixed internal tables_to_clear list, not user input
             logger.info("Cleared table: %s", table)
 
         db.commit()

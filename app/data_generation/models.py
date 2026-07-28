@@ -1,16 +1,14 @@
-from pydantic import BaseModel
 from sqlalchemy import (
-    Column,
     BigInteger,
+    Column,
+    Date,
+    DateTime,
     Integer,
+    Numeric,
     String,
     Text,
-    DateTime,
-    Date,
-    Numeric,
 )
 from sqlalchemy.orm import declarative_base
-
 
 Base = declarative_base()
 class User(Base):

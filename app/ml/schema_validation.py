@@ -1,6 +1,5 @@
 import pandas as pd
 
-
 REQUIRED_COLUMNS = {
     "suppliers": ["code", "name"],
     "bookings": ["id", "status", "booking_date"],

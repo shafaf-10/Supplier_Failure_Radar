@@ -1,0 +1,66 @@
+
+
+services:
+
+  mysql:
+    image: mysql:8.4
+    container_name: supplier_mysql
+
+    restart: unless-stopped
+
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: supplier_radar_db
+
+    ports:
+      - "3306:3306"
+
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: supplier_redis
+
+    restart: unless-stopped
+
+    ports:
+      - "6379:6379"
+    healthcheck:
+     test: ["CMD", "redis-cli", "ping"]
+     interval: 10s
+     timeout: 5s
+     retries: 5
+
+  api:
+    build: .
+
+    container_name: supplier_api
+
+    restart: unless-stopped
+
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+          condition: service_healthy
+
+    env_file:
+      - .env
+
+    environment:
+      DATABASE_URL: mysql+pymysql://root:root@mysql:3306/supplier_radar_db
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+
+    ports:
+      - "8000:8000"
+
+volumes:
+  mysql_data:

@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 from app.ml.train_model import train_models
 from app.observability.logger import setup_logger
 
-
 logger = setup_logger(__name__)
 
 _RETRAIN_LOCK = threading.Lock()

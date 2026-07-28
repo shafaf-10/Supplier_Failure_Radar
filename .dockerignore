@@ -1,0 +1,45 @@
+# Git
+.git
+.github
+.gitignore
+
+# Secrets and local environment files
+.env
+.env.*
+!.env.example
+
+# Python environments and cache
+venv
+.venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# IDE and OS files
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Test and coverage output
+.coverage
+htmlcov
+coverage.xml
+
+# Runtime output
+logs
+*.log
+
+# Local databases and temporary files
+*.db
+*.sqlite
+*.sqlite3
+tmp
+temp
+
+# Build artifacts
+build
+dist
+*.egg-info

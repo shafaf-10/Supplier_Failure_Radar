@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sfr-config
+  labels:
+    app: supplier-failure-radar
+data:
+  DB_HOST: "mysql-service"
+  DB_PORT: "3306"
+  DB_NAME: "supplier_radar_db"
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+  APP_NAME: "Supplier Failure Radar"
+  DEBUG: "false"
+  TRAINING_DATA_PROVENANCE: "SYNTHETIC"
+  ALLOW_SYNTHETIC_TRAINING: "true"
+  ENABLE_PRODUCTION_VALIDATION: "false"
+  MIN_PRODUCTION_TRAINING_ROWS: "1000"
+  MIN_PRODUCTION_SNAPSHOTS: "60"
+  MIN_PRODUCTION_ACCURACY_24H: "0.70"
+  MIN_PRODUCTION_ACCURACY_3D: "0.75"
+  MIN_PRODUCTION_ACCURACY_7D: "0.80"
+  MIN_PRODUCTION_SEVERITY_ACCURACY: "0.60"

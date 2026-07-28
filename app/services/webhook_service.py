@@ -1,7 +1,7 @@
 
-from app.infra.settings import settings
 import requests
 
+from app.infra.settings import settings
 from app.observability.logger import setup_logger
 
 logger = setup_logger(__name__)

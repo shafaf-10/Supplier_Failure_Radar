@@ -1,26 +1,56 @@
-fastapi
-uvicorn
+# fastapi
+# uvicorn
 
-streamlit
+# streamlit
+# requests
 
-pandas
-numpy
+# pandas
+# numpy
 
-scikit-learn
-joblib
+# scikit-learn
+# joblib
 
-sqlalchemy
-pymysql
+# sqlalchemy
+# pymysql
 
-redis
+# redis
 
-apscheduler
+# apscheduler
 
-pydantic
-pydantic-settings
+# pydantic
+# pydantic-settings
 
-python-dotenv
+# python-dotenv
 
-plotly
+# plotly
 
-prometheus_client>=0.20.0
+# prometheus_client>=0.20.0
+
+
+fastapi==0.116.1
+uvicorn==0.35.0
+
+streamlit==1.47.1
+requests==2.32.4
+
+pandas==2.3.2
+numpy==2.3.2
+
+scikit-learn==1.7.1
+joblib==1.5.2
+
+sqlalchemy==2.0.43
+pymysql==1.1.2
+
+redis==6.4.0
+
+apscheduler==3.11.0
+
+pydantic==2.11.7
+pydantic-settings==2.10.1
+
+python-dotenv==1.1.1
+
+plotly==6.3.0
+
+prometheus_client==0.22.1

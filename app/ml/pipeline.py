@@ -1,9 +1,9 @@
-from app.ml.feature_builder import build_supplier_features
-from app.ml.anomaly_detector import detect_anomalies
-from app.observability.logger import setup_logger
-from app.ml.drift_detector import detect_feature_drift
 import pandas as pd
 
+from app.ml.anomaly_detector import detect_anomalies
+from app.ml.drift_detector import detect_feature_drift
+from app.ml.feature_builder import build_supplier_features
+from app.observability.logger import setup_logger
 
 logger = setup_logger(__name__)
 

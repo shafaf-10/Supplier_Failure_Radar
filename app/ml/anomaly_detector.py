@@ -12,7 +12,6 @@ from app.ml.prediction_recommendations import (
 )
 from app.observability.logger import setup_logger
 
-
 logger = setup_logger(__name__)
 
 

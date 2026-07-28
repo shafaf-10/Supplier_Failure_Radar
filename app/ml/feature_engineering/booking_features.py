@@ -1,6 +1,6 @@
 import pandas as pd
 
-from app.ml.feature_engineering.helpers import to_dt, safe_rate
+from app.ml.feature_engineering.helpers import safe_rate, to_dt
 
 
 def build_booking_features(bookings, days=None):

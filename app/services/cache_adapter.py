@@ -1,7 +1,7 @@
 from app.infra.redis_provider import (
+    delete_cache,
     get_cache,
     set_cache,
-    delete_cache,
 )
 
 

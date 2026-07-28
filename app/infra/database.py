@@ -4,11 +4,14 @@ from sqlalchemy.orm import sessionmaker
 from app.infra.settings import settings
 
 DATABASE_URL = (
-    f"mysql+pymysql://{settings.DB_USER}:"
-    f"{settings.DB_PASSWORD}@"
-    f"{settings.DB_HOST}:"
-    f"{settings.DB_PORT}/"
-    f"{settings.DB_NAME}"
+    settings.DATABASE_URL
+    or (
+        f"mysql+pymysql://{settings.DB_USER}:"
+        f"{settings.DB_PASSWORD}@"
+        f"{settings.DB_HOST}:"
+        f"{settings.DB_PORT}/"
+        f"{settings.DB_NAME}"
+    )
 )
 
 engine = create_engine(

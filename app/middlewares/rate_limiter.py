@@ -4,7 +4,6 @@ from collections import defaultdict, deque
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-
 RATE_LIMIT = 60
 WINDOW_SECONDS = 60
 

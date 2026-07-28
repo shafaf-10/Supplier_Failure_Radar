@@ -16,7 +16,6 @@ from app.ml.feature_engineering.ticketing_features import build_ticketing_featur
 from app.ml.feature_engineering.wallet_features import build_wallet_features
 from app.observability.logger import setup_logger
 
-
 logger = setup_logger(__name__)
 
 

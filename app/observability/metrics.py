@@ -1,6 +1,5 @@
-from prometheus_client import Counter, Histogram, generate_latest
 from fastapi import Response
-
+from prometheus_client import Counter, Histogram, generate_latest
 
 prediction_runs_total = Counter(
     "supplier_prediction_runs_total",

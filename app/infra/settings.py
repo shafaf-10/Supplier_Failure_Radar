@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     DB_USER: str = "root"
     DB_PASSWORD: str = ""
     DB_NAME: str = "supplier_failure_radar"
+    DATABASE_URL: str | None = None
 
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379

@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: sfr-api-service
+  labels:
+    app: supplier-failure-radar
+spec:
+  type: ClusterIP
+  selector:
+    app: supplier-failure-radar
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000

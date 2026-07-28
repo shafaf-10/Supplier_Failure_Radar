@@ -3,12 +3,10 @@ from pathlib import Path
 
 import pandas as pd
 
-
 ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
 from app.infra.database import engine
-
 
 REQUIRED_TABLES = [
     "suppliers",
