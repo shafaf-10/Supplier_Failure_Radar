@@ -1,9 +1,8 @@
-
-
 services:
 
   mysql:
     image: mysql:8.4
+    platform: linux/amd64
     container_name: supplier_mysql
 
     restart: unless-stopped
@@ -13,7 +12,7 @@ services:
       MYSQL_DATABASE: supplier_radar_db
 
     ports:
-      - "3306:3306"
+      - "3307:3306"
 
     volumes:
       - mysql_data:/var/lib/mysql
@@ -61,6 +60,48 @@ services:
 
     ports:
       - "8000:8000"
+
+  celery-worker:
+    build: .
+    container_name: supplier_celery_worker
+    command: celery -A app.celery_app worker --loglevel=info
+
+    restart: unless-stopped
+
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    env_file:
+      - .env
+
+    environment:
+      DATABASE_URL: mysql+pymysql://root:root@mysql:3306/supplier_radar_db
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+
+  celery-beat:
+    build: .
+    container_name: supplier_celery_beat
+    command: celery -A app.celery_app beat --loglevel=info
+
+    restart: unless-stopped
+
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    env_file:
+      - .env
+
+    environment:
+      DATABASE_URL: mysql+pymysql://root:root@mysql:3306/supplier_radar_db
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
 
 volumes:
   mysql_data:

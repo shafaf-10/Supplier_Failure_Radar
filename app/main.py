@@ -1,6 +1,5 @@
 from contextlib import asynccontextmanager
 
-from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -9,63 +8,17 @@ from app.infra.settings import settings
 from app.middlewares.error_handler import error_handler_middleware
 from app.middlewares.rate_limiter import rate_limit_middleware
 from app.middlewares.request_logger import request_logger_middleware
-from app.ml.retraining_scheduler import start_retraining_scheduler
 from app.observability.logger import setup_logger
 from app.observability.metrics import metrics_response
-from app.services.supplier_prediction_service import SupplierPredictionService
 
 logger = setup_logger(__name__)
-
-scheduler = BackgroundScheduler()
-_scheduler_failure_count = 0
-
-
-def scheduled_supplier_pipeline():
-    global _scheduler_failure_count
-
-    try:
-        logger.info("Scheduled supplier prediction pipeline started.")
-
-        SupplierPredictionService.get_predictions(period="all")
-        _scheduler_failure_count = 0
-
-        logger.info("Scheduled supplier pipeline completed and cached in Redis.")
-
-    except Exception as error:
-        _scheduler_failure_count += 1
-
-        logger.exception(
-            "Scheduled supplier pipeline failed. Consecutive failures: %s. Error: %s",
-            _scheduler_failure_count,
-            error,
-        )
-
-        if _scheduler_failure_count >= 3:
-            logger.error(
-                "ALERT: Supplier prediction scheduler failed %s times consecutively.",
-                _scheduler_failure_count,
-            )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    scheduler.add_job(
-        scheduled_supplier_pipeline,
-        trigger="interval",
-        minutes=15,
-        id="supplier_prediction_pipeline",
-        replace_existing=True,
-    )
-
-    scheduler.start()
-    logger.info("Scheduler started. Supplier pipeline runs every 15 minutes.")
-
-    start_retraining_scheduler(interval_minutes=60)
-
+    logger.info("API startup complete. Scheduled jobs now run via Celery Beat, not in-process.")
     yield
-
-    scheduler.shutdown()
-    logger.info("Scheduler stopped.")
+    logger.info("API shutdown.")
 
 
 app = FastAPI(
