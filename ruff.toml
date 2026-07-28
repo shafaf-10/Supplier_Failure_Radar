@@ -1,5 +1,7 @@
 line-length = 130
 
+extend-exclude = ["alembic/versions"]
+
 [lint]
 select = ["E", "F", "I"]
 
@@ -7,3 +9,5 @@ select = ["E", "F", "I"]
 "tests/*" = ["F401"]
 "tests/test_db.py" = ["E402"]
 "app/data_generation/generate_training_data.py" = ["E402"]
+"alembic/env.py" = ["I001"]
+"streamlit_app/app.py" = ["E402", "I001"]
