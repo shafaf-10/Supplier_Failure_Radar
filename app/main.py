@@ -10,6 +10,7 @@ from app.middlewares.rate_limiter import rate_limit_middleware
 from app.middlewares.request_logger import request_logger_middleware
 from app.observability.logger import setup_logger
 from app.observability.metrics import metrics_response
+from app.observability.tracing import setup_tracing
 
 logger = setup_logger(__name__)
 
@@ -26,6 +27,7 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+setup_tracing(app)
 
 
 # FastAPI registers this function through the route decorator.
