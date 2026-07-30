@@ -13,33 +13,39 @@ _request_log = defaultdict(deque)
 def cleanup_old_clients(now: float) -> None:
     expired_clients = []
 
-    for client_ip, timestamps in _request_log.items():
+    for client_key, timestamps in _request_log.items():
         while timestamps and now - timestamps[0] > WINDOW_SECONDS:
             timestamps.popleft()
 
         if not timestamps:
-            expired_clients.append(client_ip)
+            expired_clients.append(client_key)
 
-    for client_ip in expired_clients:
-        del _request_log[client_ip]
+    for client_key in expired_clients:
+        del _request_log[client_key]
 
 
 async def rate_limit_middleware(
     request: Request,
     call_next,
 ):
-    client_ip = request.client.host if request.client else "unknown"
+    api_key = request.headers.get("X-API-Key")
+    client_key = (
+        f"key:{api_key}"
+        if api_key
+        else f"ip:{request.client.host if request.client else 'unknown'}"
+    )
+
     now = time.time()
 
     cleanup_old_clients(now)
 
-    timestamps = _request_log[client_ip]
+    timestamps = _request_log[client_key]
 
     if len(timestamps) >= RATE_LIMIT:
         return JSONResponse(
             status_code=429,
             content={
-                "detail": "Rate limit exceeded. Try again later."
+                "detail": "Rate limit exceeded. Try again later.",
             },
         )
 

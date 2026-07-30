@@ -4,12 +4,17 @@ from fastapi.concurrency import run_in_threadpool
 from app.observability.audit_logger import log_prediction_view
 from app.services.supplier_prediction_service import SupplierPredictionService
 
+from app.schemas.supplier_prediction import (
+    RefreshModelResponse,
+    SupplierPredictionsResponse,
+)
+
 router = APIRouter()
 
 VALID_PERIODS = ["24h", "7d", "30d", "1y", "all"]
 
 # FastAPI registers this function through the route decorator.
-@router.get("/supplier-predictions")
+@router.get("/supplier-predictions", response_model=SupplierPredictionsResponse)
 async def get_supplier_predictions(  # noqa
     request: Request,
     period: str = Query("all"),
@@ -44,7 +49,7 @@ async def get_supplier_predictions(  # noqa
     }
 
 # FastAPI registers this function through the route decorator.
-@router.post("/refresh-model")
+@router.post("/refresh-model", response_model=RefreshModelResponse)
 async def refresh_model():  # noqa
     try:
         SupplierPredictionService.clear_cache()
