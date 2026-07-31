@@ -2,12 +2,11 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 
 from app.observability.audit_logger import log_prediction_view
-from app.services.supplier_prediction_service import SupplierPredictionService
-
 from app.schemas.supplier_prediction import (
     RefreshModelResponse,
     SupplierPredictionsResponse,
 )
+from app.services.supplier_prediction_service import SupplierPredictionService
 
 router = APIRouter()
 

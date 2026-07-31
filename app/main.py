@@ -25,7 +25,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     version="1.0.0",
-    description="Supplier failure risk prediction API — current risk scoring, future-window forecasting, and anomaly detection for suppliers.",
+    description=(
+        "...scoring, future-window "
+        "forecasting, and anomaly detection for suppliers."
+    ),
     lifespan=lifespan,
 )
 setup_tracing(app)
