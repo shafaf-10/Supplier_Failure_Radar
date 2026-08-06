@@ -1,5 +1,9 @@
 import pandas as pd
 
+from app.ml.failure_attribution import (
+    attribute_failure_sources,
+    filter_supplier_sources,
+)
 from app.ml.feature_builder import (
     add_backward_compatible_columns,
     add_time_series_features,
@@ -591,6 +595,30 @@ def build_temporal_training_dataset() -> pd.DataFrame:
             "bookings.booking_date column is required "
             "for temporal training."
         )
+
+    logger.info(
+        "Running failure attribution on training tables "
+        "so the model learns from supplier-caused "
+        "instability only."
+    )
+
+    attribution_frames = attribute_failure_sources(
+        {
+            "bookings": bookings,
+            "booking_processes": booking_processes,
+            "search_sessions": search_sessions,
+        }
+    )
+
+    bookings = filter_supplier_sources(
+        attribution_frames["bookings"]
+    )
+    booking_processes = filter_supplier_sources(
+        attribution_frames["booking_processes"]
+    )
+    search_sessions = filter_supplier_sources(
+        attribution_frames["search_sessions"]
+    )
 
     bookings = _convert_datetime(
         bookings,

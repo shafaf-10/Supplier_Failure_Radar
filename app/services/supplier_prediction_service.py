@@ -15,6 +15,7 @@ from app.observability.metrics import (
     prediction_runs_total,
 )
 from app.services.cache_adapter import CacheAdapter
+from app.infra.settings import settings
 from app.services.webhook_service import send_webhook
 
 logger = setup_logger(__name__)
@@ -371,6 +372,15 @@ class SupplierPredictionService:
                 ),
                 4,
             ),
+            "internal_failure_count": cls._to_int(
+                row.get("internal_failure_count")
+            ),
+            "internal_failure_rate": round(
+                cls._to_float(
+                    row.get("internal_failure_rate")
+                ),
+                4,
+            ),
             "created_at": (
                 datetime.now().isoformat(
                     timespec="seconds"
@@ -659,6 +669,20 @@ class SupplierPredictionService:
             cls._get_model_validation_info()
         )
 
+        attrs = getattr(prediction_df, "attrs", {}) or {}
+        platform_health = {
+            "platform_incident": attrs.get("platform_incident", False),
+            "incident_windows": attrs.get("incident_windows", []),
+            "internal_failure_events": attrs.get(
+                "internal_failure_events", 0
+            ),
+            "internal_failure_rate": attrs.get(
+                "internal_failure_rate", 0.0
+            ),
+            "drift_status": attrs.get("drift_status"),
+            "drifted_features": attrs.get("drifted_features", []),
+        }
+
         if (
             prediction_df is None
             or prediction_df.empty
@@ -669,6 +693,7 @@ class SupplierPredictionService:
                 "model_validation": (
                     model_validation
                 ),
+                "platform_health": platform_health,
                 "summary": cls._build_summary(
                     []
                 ),
@@ -700,57 +725,75 @@ class SupplierPredictionService:
             )
         ]
 
-        for supplier in suppliers:
-            if (
-                supplier.get(
-                    "early_warning_status"
-                )
-                == "CRITICAL_WARNING"
-            ):
-                send_webhook(
-                    {
-                        "supplier_code": (
-                            supplier[
-                                "supplier_code"
-                            ]
-                        ),
-                        "supplier_name": (
-                            supplier[
-                                "supplier_name"
-                            ]
-                        ),
-                        "risk_level": (
-                            supplier[
-                                "risk_level"
-                            ]
-                        ),
-                        "future_probability_24h": (
-                            supplier[
-                                "future_probability_24h"
-                            ]
-                        ),
-                        "future_probability_3d": (
-                            supplier[
-                                "future_probability_3d"
-                            ]
-                        ),
-                        "future_probability_7d": (
-                            supplier[
-                                "future_probability_7d"
-                            ]
-                        ),
-                        "future_unavailability_severity": (
-                            supplier[
-                                "future_unavailability_severity"
-                            ]
-                        ),
-                        "future_risk_window": (
-                            supplier[
-                                "future_risk_window"
-                            ]
-                        ),
-                    }
-                )
+        if platform_health["platform_incident"]:
+            send_webhook(
+                {
+                    "event_type": "PLATFORM_INCIDENT",
+                    "incident_windows": platform_health[
+                        "incident_windows"
+                    ],
+                    "internal_failure_events": platform_health[
+                        "internal_failure_events"
+                    ],
+                    "drifted_features": platform_health[
+                        "drifted_features"
+                    ],
+                },
+                url=settings.PLATFORM_WEBHOOK_URL
+                or settings.WEBHOOK_URL,
+            )
+        else:
+            for supplier in suppliers:
+                if (
+                    supplier.get(
+                        "early_warning_status"
+                    )
+                    == "CRITICAL_WARNING"
+                ):
+                    send_webhook(
+                        {
+                            "supplier_code": (
+                                supplier[
+                                    "supplier_code"
+                                ]
+                            ),
+                            "supplier_name": (
+                                supplier[
+                                    "supplier_name"
+                                ]
+                            ),
+                            "risk_level": (
+                                supplier[
+                                    "risk_level"
+                                ]
+                            ),
+                            "future_probability_24h": (
+                                supplier[
+                                    "future_probability_24h"
+                                ]
+                            ),
+                            "future_probability_3d": (
+                                supplier[
+                                    "future_probability_3d"
+                                ]
+                            ),
+                            "future_probability_7d": (
+                                supplier[
+                                    "future_probability_7d"
+                                ]
+                            ),
+                            "future_unavailability_severity": (
+                                supplier[
+                                    "future_unavailability_severity"
+                                ]
+                            ),
+                            "future_risk_window": (
+                                supplier[
+                                    "future_risk_window"
+                                ]
+                            ),
+                        }
+                    )
 
         latest_date = (
             datetime.now().isoformat(
@@ -764,6 +807,7 @@ class SupplierPredictionService:
             "model_validation": (
                 model_validation
             ),
+            "platform_health": platform_health,
             "summary": cls._build_summary(
                 suppliers
             ),

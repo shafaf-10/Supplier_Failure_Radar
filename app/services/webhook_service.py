@@ -1,4 +1,3 @@
-
 import requests
 
 from app.infra.settings import settings
@@ -7,8 +6,8 @@ from app.observability.logger import setup_logger
 logger = setup_logger(__name__)
 
 
-def send_webhook(message: dict) -> None:
-    webhook_url = settings.WEBHOOK_URL
+def send_webhook(message: dict, url: str | None = None) -> None:
+    webhook_url = url or settings.WEBHOOK_URL
 
     if not webhook_url:
         logger.warning("WEBHOOK_URL is not configured. Webhook skipped.")

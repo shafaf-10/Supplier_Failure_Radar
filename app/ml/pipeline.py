@@ -35,6 +35,23 @@ def run_prediction_pipeline(days: int | None = 30) -> pd.DataFrame:
 
     prediction_df = detect_anomalies(features_df)
 
+    prediction_df.attrs["platform_incident"] = features_df.attrs.get(
+        "platform_incident", False
+    )
+    prediction_df.attrs["incident_windows"] = features_df.attrs.get(
+        "incident_windows", []
+    )
+    prediction_df.attrs["internal_failure_events"] = features_df.attrs.get(
+        "internal_failure_events", 0
+    )
+    prediction_df.attrs["internal_failure_rate"] = features_df.attrs.get(
+        "internal_failure_rate", 0.0
+    )
+    prediction_df.attrs["drift_status"] = drift_result.get("drift_status")
+    prediction_df.attrs["drifted_features"] = drift_result.get(
+        "drifted_features", []
+    )
+
     logger.info("Supplier prediction pipeline completed successfully.")
 
     return prediction_df

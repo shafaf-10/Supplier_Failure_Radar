@@ -8,6 +8,14 @@ class ModelValidationInfo(BaseModel):
     prediction_notice: str
 
 
+class PlatformHealth(BaseModel):
+    platform_incident: bool = False
+    incident_windows: list[str] = []
+    internal_failure_events: int = 0
+    internal_failure_rate: float = 0.0
+    drift_status: str | None = None
+    drifted_features: list[str] = []
+
 class SupplierRecord(BaseModel):
     supplier_code: str | None = None
     supplier_name: str | None = None
@@ -37,6 +45,8 @@ class SupplierRecord(BaseModel):
     credit_rejection_rate: float
     search_failure_rate: float
     wallet_risk_rate: float
+    internal_failure_count: int = 0
+    internal_failure_rate: float = 0.0
     created_at: str
 
 
@@ -62,6 +72,7 @@ class SupplierPredictionsResponse(BaseModel):
     period: str
     latest_date: str | None = None
     model_validation: ModelValidationInfo
+    platform_health: PlatformHealth | None = None
     summary: PredictionSummary
     suppliers: list[SupplierRecord]
     limit: int | None = None

@@ -2,6 +2,13 @@ import pandas as pd
 from sqlalchemy import text
 
 from app.infra.database import engine
+from app.infra.settings import settings
+from app.ml.failure_attribution import (
+    attribute_failure_sources,
+    compute_internal_failure_counts,
+    detect_platform_incident_windows,
+    filter_supplier_sources,
+)
 from app.ml.feature_engineering.booking_features import build_booking_features
 from app.ml.feature_engineering.build_master import build_master_supplier_table
 from app.ml.feature_engineering.credit_features import build_credit_features
@@ -422,6 +429,60 @@ def build_supplier_features(days=None):
     validate_table_schema("credit_requests", credit_requests)
     validate_table_schema("wallet_transactions", wallet_transactions)
 
+    platform_health = {
+        "platform_incident": False,
+        "incident_windows": [],
+        "internal_failure_events": 0,
+        "internal_failure_rate": 0.0,
+    }
+    internal_counts = pd.DataFrame()
+
+    if settings.FAILURE_ATTRIBUTION_ENABLED:
+        logger.info("Running failure attribution on raw failure tables.")
+
+        attribution_frames = {
+            "bookings": bookings,
+            "booking_processes": booking_processes,
+            "search_sessions": search_sessions,
+        }
+
+        _, incident_summary = detect_platform_incident_windows(attribution_frames)
+        attribution_frames = attribute_failure_sources(attribution_frames)
+
+        internal_counts = compute_internal_failure_counts(attribution_frames)
+        total_internal = (
+            int(internal_counts["internal_failure_count"].sum())
+            if not internal_counts.empty
+            else 0
+        )
+        total_events = sum(
+            len(df) for df in attribution_frames.values() if df is not None
+        )
+
+        platform_health = {
+            "platform_incident": incident_summary["platform_incident"],
+            "incident_windows": incident_summary["incident_windows"],
+            "internal_failure_events": total_internal,
+            "internal_failure_rate": (
+                total_internal / total_events if total_events else 0.0
+            ),
+        }
+
+        bookings = filter_supplier_sources(attribution_frames["bookings"])
+        booking_processes = filter_supplier_sources(
+            attribution_frames["booking_processes"]
+        )
+        search_sessions = filter_supplier_sources(
+            attribution_frames["search_sessions"]
+        )
+
+        if platform_health["platform_incident"]:
+            logger.warning(
+                "Active platform incident detected (%s internal failure events); "
+                "supplier scoring excludes INTERNAL-attributed rows.",
+                total_internal,
+            )
+
     logger.info("Building supplier feature groups.")
 
     booking_features = build_booking_features(bookings, days=days)
@@ -489,6 +550,19 @@ def build_supplier_features(days=None):
     features=features,
     bookings=bookings,
 )
+
+    if not internal_counts.empty and "supplier_code" in features.columns:
+        features = features.merge(internal_counts, on="supplier_code", how="left")
+        features["internal_failure_count"] = features["internal_failure_count"].fillna(0)
+        features["internal_failure_rate"] = features["internal_failure_rate"].fillna(0.0)
+    else:
+        features["internal_failure_count"] = 0
+        features["internal_failure_rate"] = 0.0
+
+    features.attrs["platform_incident"] = platform_health["platform_incident"]
+    features.attrs["incident_windows"] = platform_health["incident_windows"]
+    features.attrs["internal_failure_events"] = platform_health["internal_failure_events"]
+    features.attrs["internal_failure_rate"] = platform_health["internal_failure_rate"]
 
     logger.info("Supplier features created successfully.")
 

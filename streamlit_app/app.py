@@ -461,6 +461,7 @@ except Exception as exc:
     st.stop()
 
 summary = data.get("summary", {}) or {}
+platform_health = data.get("platform_health") or {}
 df = pd.DataFrame(data.get("suppliers", []) or [])
 
 if df.empty:
@@ -502,6 +503,8 @@ DEFAULTS = {
     "credit_rejection_rate": 0,
     "search_failure_rate": 0,
     "wallet_risk_rate": 0,
+    "internal_failure_count": 0,
+    "internal_failure_rate": 0,
 }
 
 for column_name, default_value in DEFAULTS.items():
@@ -550,6 +553,8 @@ for numeric_column in [
     "credit_rejection_rate",
     "search_failure_rate",
     "wallet_risk_rate",
+    "internal_failure_count",
+    "internal_failure_rate",
     "current_anomaly_score",
     "anomaly_score",
 ]:
@@ -625,6 +630,16 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+if platform_health.get("platform_incident"):
+    st.error(
+        "Platform Incident — recent failures originated from our own "
+        "platform, not from suppliers. Supplier risk alerts are "
+        f"suppressed during this window. Internal failure events: "
+        f"{to_int(platform_health.get('internal_failure_events'))}. "
+        f"Drifted features: "
+        f"{', '.join(platform_health.get('drifted_features') or []) or 'none'}."
+    )
+
 # -----------------------------------------------------------------------------
 # Summary cards
 # -----------------------------------------------------------------------------
@@ -677,6 +692,9 @@ st.markdown(
 # Immediate action cards
 # -----------------------------------------------------------------------------
 st.markdown('<div class="section-label">Requires Immediate Action</div>', unsafe_allow_html=True)
+
+if platform_health.get("platform_incident"):
+    st.caption("Supplier alerts are suppressed while a platform incident is active.")
 
 critical_df = filtered[filtered["early_warning_status"] == "CRITICAL_WARNING"].sort_values(
     "_future_prob", ascending=False
@@ -749,6 +767,7 @@ else:
             "CURRENT_NORMAL": "Normal",
         }
     )
+    table_df["Internal Failures"] = table_df["internal_failure_count"].apply(to_int)
 
     display_columns = [
         "Supplier",
@@ -761,6 +780,7 @@ else:
         "Failure Rate",
         "Pending Rate",
         "Bookings",
+        "Internal Failures",
     ]
 
     st.dataframe(

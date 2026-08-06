@@ -794,6 +794,8 @@ def detect_anomalies(
     optional_metadata_columns = [
         "training_data_provenance",
         "production_validated",
+        "internal_failure_count",
+        "internal_failure_rate",
     ]
 
     for column in optional_metadata_columns:

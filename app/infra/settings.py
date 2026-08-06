@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     env_file=".env",
     extra="ignore",
 )
+    FAILURE_ATTRIBUTION_ENABLED: bool = True
+    INCIDENT_RATE_MULTIPLIER: float = 3.0
+    INCIDENT_MIN_ABS_RATE_DELTA: float = 0.05
+    INCIDENT_MIN_AFFECTED_FRACTION: float = 0.5
+    INCIDENT_MIN_EVENTS: int = 20
+    INCIDENT_BASELINE_DAYS: int = 30
+    PLATFORM_WEBHOOK_URL: str | None = None
 
 
 settings = Settings()
