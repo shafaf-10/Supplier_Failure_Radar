@@ -6,6 +6,7 @@ import pandas as pd
 
 from app.infra.paths import MODEL_DIR
 from app.infra.redis_provider import get_redis_lock
+from app.infra.settings import settings
 from app.ml.pipeline import run_prediction_pipeline
 from app.observability.logger import setup_logger
 from app.observability.metrics import (
@@ -15,7 +16,6 @@ from app.observability.metrics import (
     prediction_runs_total,
 )
 from app.services.cache_adapter import CacheAdapter
-from app.infra.settings import settings
 from app.services.webhook_service import send_webhook
 
 logger = setup_logger(__name__)

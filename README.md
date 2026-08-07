@@ -335,6 +335,65 @@ Older model versions are automatically cleaned to prevent unlimited disk growth.
 
 ---
 
+# Failure Attribution (Laravel ↔ Radar contract)
+
+Not every failure logged in `bookings`, `booking_processes`, or `search_sessions`
+is actually the supplier's fault — bugs in our own platform code (Laravel or
+the radar itself) can also produce failure rows. The radar attributes every
+failure to `SUPPLIER`, `INTERNAL`, `TIMEOUT`, or `UNKNOWN`, and excludes
+`INTERNAL` failures from supplier risk scoring, ML features, training data,
+and supplier alerts. `INTERNAL` failures are surfaced separately as a
+Platform Incident instead.
+
+## Migration (shared MySQL DB)
+
+```sql
+ALTER TABLE booking_processes
+  ADD COLUMN failure_source VARCHAR(20) NULL,  -- SUPPLIER | INTERNAL | TIMEOUT | UNKNOWN
+  ADD COLUMN error_code VARCHAR(100) NULL,
+  ADD COLUMN latency_ms INT NULL;
+
+ALTER TABLE search_sessions
+  ADD COLUMN failure_source VARCHAR(20) NULL,
+  ADD COLUMN error_code VARCHAR(100) NULL,
+  ADD COLUMN latency_ms INT NULL;
+
+ALTER TABLE bookings
+  ADD COLUMN failure_source VARCHAR(20) NULL;  -- for FAILED/EXPIRED rows
+```
+
+The radar reads these columns automatically via its existing `SELECT *`
+queries — no radar code change is needed once the migration is applied.
+
+## Tagging rules (Laravel catch blocks)
+
+| Condition | `failure_source` |
+|---|---|
+| Guzzle `ConnectException` / cURL timeout (code 28) / read timeout to supplier | `TIMEOUT` |
+| Supplier HTTP client returned 4xx/5xx to a valid request | `SUPPLIER` |
+| `QueryException`, `RedisException`, `ValidationException`, any uncaught `LogicException`/`Error`, own-endpoint 500 | `INTERNAL` |
+| Anything else | `UNKNOWN` |
+
+Also set `error_code` (exception class or supplier error code) and
+`latency_ms` (request duration). Only `INTERNAL` is excluded from supplier
+scoring — `SUPPLIER`, `TIMEOUT`, and `UNKNOWN` all still count toward
+supplier risk.
+
+## Fallback (untagged rows)
+
+If a row has no `failure_source` (or an invalid value), the radar falls back
+to its own inference, in order: a detected platform-incident window (many
+suppliers failing at once) → `INTERNAL`; keyword matching on the row's error
+text → `INTERNAL` or `SUPPLIER`; for `search_sessions`, whether every
+supplier in that search failed together (`INTERNAL`) or only some
+(`SUPPLIER`); otherwise `UNKNOWN`.
+
+## Admin integration
+
+The Laravel admin panel embeds or proxies the radar endpoints
+(`GET /supplier-predictions`, `POST /refresh-model`) with the `X-API-Key`
+header; the radar reads the same shared database.
+
 # Author
 
 **Supplier Failure Radar Backend**

@@ -666,6 +666,9 @@ def detect_anomalies(
             }
         )
     )
+    df["anomaly_status"] = df[
+        "current_anomaly_status"
+    ]
 
     if not MODEL_FILE.exists():
         raise FileNotFoundError(
@@ -760,6 +763,8 @@ def detect_anomalies(
         "prediction_probability",
         "current_anomaly_score",
         "current_anomaly_status",
+        "anomaly_status",
+        "recommendation",
         "recommendation",
         "future_probability_24h",
         "future_probability_3d",
